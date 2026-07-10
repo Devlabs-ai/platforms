@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-history
+  namespace: spark
+  labels:
+    app.kubernetes.io/name: spark-history
+    app.kubernetes.io/part-of: spark-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spark-history
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spark-history
+    spec:
+      containers:
+        - name: history
+          image: apache/spark:3.5.3
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -lc
+            - |
+              mkdir -p /mnt/spark-events
+              exec /opt/spark/bin/spark-class org.apache.spark.deploy.history.HistoryServer
+          env:
+            - name: SPARK_HISTORY_OPTS
+              value: >-
+                -Dspark.history.fs.logDirectory=file:/mnt/spark-events
+                -Dspark.history.ui.port=18080
+                -Dspark.history.retainedApplications=50
+          ports:
+            - name: http
+              containerPort: 18080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          volumeMounts:
+            - name: spark-events
+              mountPath: /mnt/spark-events
+      volumes:
+        - name: spark-events
+          persistentVolumeClaim:
+            claimName: spark-events
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-history
+  namespace: spark
+  labels:
+    app.kubernetes.io/name: spark-history
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: spark-history
+  ports:
+    - name: http
+      port: 18080
+      targetPort: 18080
+      nodePort: 30080

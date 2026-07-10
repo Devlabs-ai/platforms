@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Devlabs Platform</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #151d2e;
+      --panel2: #1c2740;
+      --border: #2a3650;
+      --text: #e8edf5;
+      --muted: #8b9cb8;
+      --accent: #38bdf8;
+      --warn: #f59e0b;
+      --ok: #34d399;
+      --cpu: #60a5fa;
+      --mem: #a78bfa;
+      --use: #34d399;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+    .sub { color: var(--muted); font-size: 0.875rem; }
+    main { max-width: 1280px; margin: 0 auto; padding: 1.5rem; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.15rem;
+    }
+    .card h2 {
+      margin: 0 0 0.75rem;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .metric {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.15rem;
+    }
+    .metric small { font-size: 0.85rem; font-weight: 500; color: var(--muted); }
+    .section { margin-bottom: 1.5rem; }
+    .section > h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .bar-group { margin-bottom: 0.85rem; }
+    .bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      margin-bottom: 0.3rem;
+      color: var(--muted);
+    }
+    .bar-track {
+      height: 10px;
+      background: var(--panel2);
+      border-radius: 999px;
+      overflow: visible;
+      position: relative;
+    }
+    .bar {
+      height: 100%;
+      border-radius: 999px;
+      transition: width 0.4s ease, background 0.3s ease;
+      position: relative;
+      z-index: 1;
+    }
+    .bar.safe { background: var(--ok); }
+    .bar.alert { background: var(--warn); }
+    .bar.danger { background: #ef4444; }
+    .bar-marker {
+      position: absolute;
+      top: -3px;
+      bottom: -3px;
+      width: 2px;
+      z-index: 2;
+      pointer-events: none;
+    }
+    .bar-marker.alert-line {
+      left: 70%;
+      background: var(--warn);
+      opacity: 0.85;
+    }
+    .bar-marker.danger-line {
+      left: 90%;
+      background: #ef4444;
+      opacity: 0.9;
+    }
+    .util-marker {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      margin-left: 0.4rem;
+      vertical-align: middle;
+      flex-shrink: 0;
+    }
+    .util-marker.safe { background: var(--ok); }
+    .util-marker.alert { background: var(--warn); }
+    .util-marker.danger { background: #ef4444; }
+    .threshold-legend .util-marker {
+      width: auto;
+      height: auto;
+      border-radius: 999px;
+      padding: 0.08rem 0.4rem;
+      font-size: 0.68rem;
+      font-weight: 600;
+    }
+    .threshold-legend .util-marker.safe { background: #14532d; color: var(--ok); }
+    .threshold-legend .util-marker.alert { background: #422006; color: var(--warn); }
+    .threshold-legend .util-marker.danger { background: #450a0a; color: #fca5a5; }
+    .threshold-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-bottom: 0.85rem;
+    }
+    .threshold-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+    td.num .util-marker { margin-left: 0.25rem; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.55rem 0.45rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 500; }
+    .table-wrap {
+      overflow-x: auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.1rem 0.45rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+    .badge.Running { background: #14532d; color: var(--ok); }
+    .badge.Succeeded { background: #1e3a5f; color: #93c5fd; }
+    .badge.Failed { background: #450a0a; color: #fca5a5; }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .status-dot.healthy { background: var(--ok); }
+    .status-dot.degraded { background: var(--warn); }
+    .status-dot.down { background: #ef4444; }
+    .status-dot.not_deployed { background: #6b7280; }
+    .status-dot.unknown { background: #8b5cf6; }
+    .health-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .health-label { text-transform: capitalize; }
+    .platform-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1rem;
+    }
+    .platform-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.15rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      border-left: 3px solid var(--border);
+    }
+    .platform-card.healthy { border-left-color: var(--ok); }
+    .platform-card.degraded { border-left-color: var(--warn); }
+    .platform-card.down { border-left-color: #ef4444; }
+    .platform-card.not_deployed { border-left-color: #6b7280; }
+    .platform-head h3 {
+      margin: 0;
+      font-size: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .platform-summary { color: var(--muted); font-size: 0.82rem; margin: 0.35rem 0 0; }
+    .platform-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem 0.75rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .ram-mini {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .ram-mini-track {
+      width: 48px;
+      height: 4px;
+      background: var(--panel2);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .ram-mini-fill {
+      height: 100%;
+      border-radius: 999px;
+    }
+    .ram-mini-fill.safe { background: var(--ok); }
+    .ram-mini-fill.alert { background: var(--warn); }
+    .ram-mini-fill.danger { background: #ef4444; }
+    .component-list { list-style: none; margin: 0; padding: 0; font-size: 0.82rem; }
+    .component-list li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.45rem 0;
+      border-top: 1px solid var(--border);
+    }
+    .component-list li:first-child { border-top: none; padding-top: 0; }
+    .component-name { font-size: 0.84rem; }
+    .component-meta { color: var(--muted); font-size: 0.72rem; margin-top: 0.1rem; }
+    a { color: #93c5fd; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    button {
+      background: var(--accent);
+      color: #0b1020;
+      border: none;
+      border-radius: 6px;
+      padding: 0.5rem 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .cleanup li { margin-bottom: 0.65rem; }
+    .cleanup code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      background: #000;
+      padding: 0.15rem 0.35rem;
+      border-radius: 4px;
+    }
+    .err { color: #fca5a5; padding: 1rem; }
+    .num { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Devlabs Platform</h1>
+      <div class="sub">Unified home-lab control plane · status · resources</div>
+    </div>
+    <div>
+      <span class="sub" id="updatedAt">—</span>
+      <button id="refreshBtn" type="button" style="margin-left:0.5rem">Refresh</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="error" class="err" hidden></div>
+
+    <div class="cards" id="summaryCards"></div>
+
+    <div class="section">
+      <h2>Platforms</h2>
+      <div class="platform-grid" id="platformCards"></div>
+    </div>
+
+    <div class="section">
+      <h2>Cluster infrastructure</h2>
+      <p class="sub" style="margin:-0.35rem 0 0.85rem">kube-system and devlabs — util % is per-pod (worst pod shown for groups). Pods without requests/limits show n/a.</p>
+      <div class="platform-grid" id="infraCards"></div>
+    </div>
+
+    <div class="section">
+      <h2>Node utilization (Colima / k3s)</h2>
+      <div class="card" id="nodeBarsCard">
+        <div class="threshold-legend">
+          <span><span class="util-marker safe">Safe</span> &lt; 70% of max</span>
+          <span><span class="util-marker alert">Alert</span> ≥ 70%</span>
+          <span><span class="util-marker danger">Danger</span> ≥ 90%</span>
+          <span>|</span>
+          <span>Vertical lines at 70% and 90% on each bar</span>
+        </div>
+        <div id="nodeBars"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>By platform (app workloads)</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Platform</th>
+              <th>Pods</th>
+              <th>CPU req</th>
+              <th>CPU limit</th>
+              <th>CPU use</th>
+              <th>Mem req</th>
+              <th>Mem limit</th>
+              <th>Mem use</th>
+            </tr>
+          </thead>
+          <tbody id="platformTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Infrastructure pods</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>NS</th>
+              <th>Pod</th>
+              <th>CPU req</th>
+              <th>CPU limit</th>
+              <th>CPU use</th>
+              <th>Mem req</th>
+              <th>Mem limit</th>
+              <th>Mem use</th>
+            </tr>
+          </thead>
+          <tbody id="infraPodTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>All app pods</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>NS</th>
+              <th>Pod</th>
+              <th>Status</th>
+              <th>CPU req→lim</th>
+              <th>Mem req→lim</th>
+              <th>CPU use</th>
+              <th>Mem use</th>
+            </tr>
+          </thead>
+          <tbody id="podTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Storage (PVCs)</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Namespace</th><th>PVC</th><th>Size</th><th>Status</th></tr>
+          </thead>
+          <tbody id="pvcTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>RAM cleanup candidates</h2>
+      <div class="card cleanup">
+        <ul id="cleanupList"></ul>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const fmtCpu = (n) => n < 1 ? `${Math.round(n * 1000)}m` : n.toFixed(2).replace(/\.00$/, '');
+    const fmtMem = (mib) => mib >= 1024 ? `${(mib / 1024).toFixed(2)} Gi` : `${Math.round(mib)} Mi`;
+
+    function utilPct(used, max) {
+      if (!max || max <= 0) return 0;
+      return Math.min(100, (used / max) * 100);
+    }
+
+    function utilLevel(pct) {
+      if (pct >= 90) return 'danger';
+      if (pct >= 70) return 'alert';
+      return 'safe';
+    }
+
+    function utilMarker(used, max) {
+      const pct = utilPct(used, max);
+      const level = utilLevel(pct);
+      return `<span class="util-marker ${level}" title="${pct.toFixed(1)}% of max"></span>`;
+    }
+
+    function healthIndicator(status, showLabel = false) {
+      const label = showLabel || (status !== 'healthy' && status !== 'Running');
+      const text = label ? `<span class="health-label">${statusLabel(status)}</span>` : '';
+      return `<span class="health-indicator" title="${statusLabel(status)}"><span class="status-dot ${status}"></span>${text}</span>`;
+    }
+
+    function ramMini(used, limit) {
+      if (!limit || limit <= 0) return `<span>${fmtMem(used)}</span>`;
+      const pct = utilPct(used, limit);
+      const level = utilLevel(pct);
+      return `<span class="ram-mini" title="${pct.toFixed(1)}% of ${fmtMem(limit)} limit">
+        <span class="ram-mini-track"><span class="ram-mini-fill ${level}" style="width:${pct}%"></span></span>
+        <span>${fmtMem(used)}</span>
+      </span>`;
+    }
+
+    function utilMarkerFromPct(pct) {
+      if (pct == null || pct === undefined) return '';
+      const level = utilLevel(pct);
+      return `<span class="util-marker ${level}" title="${pct}% of cap"></span>`;
+    }
+
+    function fmtLimit(val, fmt) {
+      return val > 0 ? fmt(val) : '—';
+    }
+
+    function usageCell(pod, kind) {
+      const used = kind === 'cpu' ? pod.cpuUsage : pod.memoryUsageMib;
+      const pct = kind === 'cpu' ? pod.cpuUtilPct : pod.memoryUtilPct;
+      const source = kind === 'cpu' ? pod.cpuCapSource : pod.memoryCapSource;
+      const fmt = kind === 'cpu' ? fmtCpu : fmtMem;
+      if (pct == null) {
+        return `<span class="num">${fmt(used)}</span><span class="sub" title="No request/limit"> n/a</span>`;
+      }
+      const capWord = source === 'limit' ? 'limit' : 'request';
+      return `<span class="num">${fmt(used)}</span>${utilMarkerFromPct(pct)}<span class="sub"> ${pct}% of ${capWord}</span>`;
+    }
+
+    function groupUsageCell(row, kind) {
+      const used = kind === 'cpu' ? row.cpuUsage : row.memoryUsageMib;
+      const pct = kind === 'cpu' ? row.cpuUtilPct : row.memoryUtilPct;
+      const fmt = kind === 'cpu' ? fmtCpu : fmtMem;
+      let extra = '';
+      if (kind === 'memory' && row.podsWithoutMemoryCap > 0) {
+        extra = `<span class="sub" title="Memory used by pods without requests/limits"> +${fmtMem(row.uncappedMemoryMib || 0)} uncapped</span>`;
+      }
+      if (pct == null) {
+        return `<span class="num">${fmt(used)}</span><span class="sub"> n/a</span>${extra}`;
+      }
+      return `<span class="num">${fmt(used)}</span>${utilMarkerFromPct(pct)}<span class="sub"> worst pod ${pct}%</span>${extra}`;
+    }
+
+    function renderStatusCards(items, targetId) {
+      document.getElementById(targetId).innerHTML = (items || []).map(p => {
+        const res = p.resources || {};
+        const comps = (p.components || []).map(c => `
+          <li>
+            <span class="component-name">
+              ${c.lanUrl && c.lanUrl.startsWith('http') ? `<a href="${c.lanUrl}" target="_blank" rel="noopener">${c.name}</a>` : c.name}
+              ${c.detail ? `<div class="component-meta">${c.detail}</div>` : ''}
+            </span>
+            ${healthIndicator(c.status, c.status !== 'healthy')}
+          </li>
+        `).join('');
+        const utilNote = res.memoryUtilPct != null
+          ? `${res.memoryUtilPct}% worst pod`
+          : (res.podsWithoutMemoryCap ? 'mixed caps' : 'n/a');
+        return `
+          <div class="platform-card ${p.status}">
+            <div class="platform-head">
+              <h3>
+                <span>${p.name}</span>
+                ${p.status !== 'healthy' ? healthIndicator(p.status, true) : ''}
+              </h3>
+              <p class="platform-summary">${p.summary}</p>
+            </div>
+            <div class="platform-meta">
+              <span>${p.healthyComponents}/${p.totalComponents} up</span>
+              <span>${fmtMem(res.memoryUsageMib || 0)} RAM</span>
+              <span>${utilNote}</span>
+              <span>ns ${p.namespace}</span>
+            </div>
+            <ul class="component-list">${comps}</ul>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderWorkloadRow(row) {
+      return `
+        <tr>
+          <td>${row.platform || row.namespace}</td>
+          <td class="num">${row.runningPods}</td>
+          <td class="num">${fmtCpu(row.cpuRequest)}</td>
+          <td class="num">${fmtLimit(row.cpuLimit, fmtCpu)}</td>
+          <td>${groupUsageCell(row, 'cpu')}</td>
+          <td class="num">${fmtMem(row.memoryRequestMib)}</td>
+          <td class="num">${fmtLimit(row.memoryLimitMib, fmtMem)}</td>
+          <td>${groupUsageCell(row, 'memory')}</td>
+        </tr>
+      `;
+    }
+
+    function renderPodRow(p) {
+      return `
+        <tr>
+          <td>${p.namespace}</td>
+          <td>${p.name}</td>
+          <td><span class="badge ${p.phase}">${p.phase}</span></td>
+          <td class="num">${fmtCpu(p.cpuRequest)} → ${fmtLimit(p.cpuLimit, fmtCpu)}</td>
+          <td class="num">${fmtMem(p.memoryRequestMib)} → ${fmtLimit(p.memoryLimitMib, fmtMem)}</td>
+          <td>${p.phase === 'Running' ? usageCell(p, 'cpu') : '—'}</td>
+          <td>${p.phase === 'Running' ? usageCell(p, 'memory') : '—'}</td>
+        </tr>
+      `;
+    }
+
+    function barRow(label, value, max, fmtFn) {
+      const pct = utilPct(value, max);
+      const level = utilLevel(pct);
+      return `
+        <div class="bar-group">
+          <div class="bar-label">
+            <span>${label}</span>
+            <span class="num">${fmtFn(value)} / ${fmtFn(max)} (${pct.toFixed(1)}%)${utilMarker(value, max)}</span>
+          </div>
+          <div class="bar-track">
+            <div class="bar-marker alert-line" title="70% alert threshold"></div>
+            <div class="bar-marker danger-line" title="90% danger threshold"></div>
+            <div class="bar ${level}" style="width:${pct}%"></div>
+          </div>
+        </div>`;
+    }
+
+    function statusLabel(s) {
+      return ({ healthy: 'Healthy', degraded: 'Degraded', down: 'Down', not_deployed: 'Not deployed', unknown: 'Unknown' })[s] || s;
+    }
+
+    function render(data) {
+      const col = data.colima;
+      const node = data.node;
+      const ps = data.platformSummary || {};
+
+      document.getElementById('updatedAt').textContent =
+        `Updated ${new Date(data.generatedAt).toLocaleString()}`;
+
+      document.getElementById('summaryCards').innerHTML = `
+        <div class="card"><h2>Cluster</h2><div class="metric">${healthIndicator(ps.status || 'unknown', true)}</div><div class="sub">${ps.healthy || 0}/${ps.total || 0} platforms up</div></div>
+        <div class="card"><h2>Colima VM</h2><div class="metric">${col.cpu} CPU</div><div class="sub">${col.memoryGib} GiB RAM allocated</div></div>
+        <div class="card"><h2>Mac Mini host</h2><div class="metric">${col.hostMemoryGib} GiB</div><div class="sub">~${col.hostHeadroomGib} GiB for macOS</div></div>
+        <div class="card"><h2>Live RAM</h2><div class="metric">${fmtMem(node.memoryUsageMib)}${utilMarker(node.memoryUsageMib, node.memoryAllocatableMib)}</div><div class="sub">${fmtMem(node.memoryAllocatableMib)} allocatable</div></div>
+      `;
+
+      document.getElementById('platformCards').innerHTML = '';
+      renderStatusCards(data.platforms, 'platformCards');
+      renderStatusCards(data.infrastructureStatus, 'infraCards');
+
+      document.getElementById('nodeBars').innerHTML =
+        barRow('CPU actual', node.cpuUsage, node.cpuAllocatable, fmtCpu) +
+        barRow('CPU requests', node.cpuRequest, node.cpuAllocatable, fmtCpu) +
+        barRow('CPU limits', node.cpuLimit, node.cpuAllocatable, fmtCpu) +
+        barRow('Memory actual', node.memoryUsageMib, node.memoryAllocatableMib, fmtMem) +
+        barRow('Memory requests', node.memoryRequestMib, node.memoryAllocatableMib, fmtMem) +
+        barRow('Memory limits', node.memoryLimitMib, node.memoryAllocatableMib, fmtMem);
+
+      document.getElementById('platformTable').innerHTML = (data.byPlatform || []).map(renderWorkloadRow).join('');
+
+      const infraPods = (data.pods || []).filter(p => p.isInfrastructure && p.phase === 'Running');
+      const appPods = (data.pods || []).filter(p => !p.isInfrastructure);
+      document.getElementById('infraPodTable').innerHTML = infraPods.map(p => `
+        <tr>
+          <td>${p.namespace}</td>
+          <td>${p.name}</td>
+          <td class="num">${fmtCpu(p.cpuRequest)}</td>
+          <td class="num">${fmtLimit(p.cpuLimit, fmtCpu)}</td>
+          <td>${usageCell(p, 'cpu')}</td>
+          <td class="num">${fmtMem(p.memoryRequestMib)}</td>
+          <td class="num">${fmtLimit(p.memoryLimitMib, fmtMem)}</td>
+          <td>${usageCell(p, 'memory')}</td>
+        </tr>
+      `).join('');
+
+      document.getElementById('podTable').innerHTML = appPods.map(renderPodRow).join('');
+
+      document.getElementById('pvcTable').innerHTML = data.pvcs.map(p => `
+        <tr><td>${p.namespace}</td><td>${p.name}</td><td>${p.size}</td><td>${p.status}</td></tr>
+      `).join('');
+
+      document.getElementById('cleanupList').innerHTML = data.cleanup.map(c => `
+        <li>
+          <strong>${c.type}</strong> — ${c.namespace}/${c.name} (${c.phase})<br/>
+          ${c.action.startsWith('kubectl') ? `<code>${c.action}</code>` : c.action}<br/>
+          <span class="sub">${c.impact}</span>
+        </li>
+      `).join('');
+    }
+
+    async function load() {
+      const err = document.getElementById('error');
+      err.hidden = true;
+      try {
+        const res = await fetch('/api/resources');
+        if (!res.ok) throw new Error(await res.text());
+        render(await res.json());
+      } catch (e) {
+        err.textContent = `Failed to load: ${e.message}`;
+        err.hidden = false;
+      }
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', load);
+    load();
+    setInterval(load, 30000);
+  </script>
+</body>
+</html>

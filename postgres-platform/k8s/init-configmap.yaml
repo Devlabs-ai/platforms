@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: postgres
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: postgres-platform
+data:
+  01_init.sql: |
+    -- Shared platform databases (official postgres image, first boot only)
+    CREATE ROLE airflow WITH LOGIN PASSWORD 'airflow';
+    CREATE DATABASE airflow_app OWNER airflow;
+
+    CREATE ROLE etl_user WITH LOGIN PASSWORD 'etl_pass';
+    CREATE DATABASE etl_db OWNER etl_user;
+
+    CREATE ROLE spark WITH LOGIN PASSWORD 'spark';
+    CREATE DATABASE spark_metadata OWNER spark;

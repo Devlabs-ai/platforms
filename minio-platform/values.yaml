@@ -1,0 +1,60 @@
+# MinIO standalone — Devlabs home-lab (Colima + k3s on Mac Mini M4)
+# Install: scripts/deploy.sh
+# Credentials are set at deploy time via --set rootUser / rootPassword (not stored here).
+
+mode: standalone
+replicas: 1
+
+image:
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    memory: 512Mi
+    cpu: 250m
+  limits:
+    memory: 1Gi
+    cpu: "1"
+
+persistence:
+  enabled: true
+  storageClass: local-path
+  accessMode: ReadWriteOnce
+  size: 20Gi
+
+service:
+  type: NodePort
+  port: "9000"
+  nodePort: 30900
+
+consoleService:
+  type: NodePort
+  port: "9001"
+  nodePort: 30901
+
+# Console redirect URL is patched at deploy time (MAC_MINI_IP).
+environment: {}
+
+buckets:
+  - name: spark-logs
+    policy: none
+    purge: false
+  - name: devlabs-data
+    policy: none
+    purge: false
+
+# Spark jobs / platform can use this key instead of root credentials.
+users:
+  - accessKey: spark
+    secretKey: spark-s3-change-me
+    policy: readwrite
+
+makeBucketJob:
+  resources:
+    requests:
+      memory: 128Mi
+
+makeUserJob:
+  resources:
+    requests:
+      memory: 128Mi

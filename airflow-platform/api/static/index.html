@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Airflow Platform</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #10b981;
+      --ok: #22c55e;
+      --fail: #ef4444;
+      --run: #3b82f6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+    .sub { color: var(--muted); font-size: 0.875rem; }
+    main { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+    }
+    .card h2 { margin: 0 0 1rem; font-size: 1rem; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }
+    input, select, textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 0.5rem 0.65rem;
+      margin-bottom: 0.75rem;
+      font-size: 0.9rem;
+    }
+    button {
+      background: var(--accent);
+      color: #111;
+      border: none;
+      border-radius: 6px;
+      padding: 0.55rem 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th, td { text-align: left; padding: 0.6rem 0.5rem; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge.success, .badge.SUCCEEDED { background: #14532d; color: var(--ok); }
+    .badge.failed, .badge.FAILED { background: #450a0a; color: var(--fail); }
+    .badge.running, .badge.RUNNING, .badge.queued, .badge.QUEUED { background: #1e3a5f; color: #93c5fd; }
+    .badge.other { background: #374151; color: var(--muted); }
+    .actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    .actions button { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+    #logs {
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+      max-height: 360px;
+      overflow: auto;
+      color: #d1d5db;
+    }
+    .toolbar { display: flex; gap: 0.5rem; align-items: center; }
+    .msg { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; }
+    a { color: #93c5fd; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Airflow Platform</h1>
+      <div class="sub">Trigger DAGs · track runs · view task logs</div>
+    </div>
+    <div class="toolbar">
+      <a id="airflowLink" href="#" target="_blank" rel="noopener">Airflow UI</a>
+      <button class="secondary" id="refreshBtn" type="button">Refresh</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="grid">
+      <section class="card">
+        <h2>Trigger DAG run</h2>
+        <form id="triggerForm">
+          <label for="dagId">DAG</label>
+          <select id="dagId" name="dagId" required></select>
+
+          <label for="user">User</label>
+          <input id="user" name="user" placeholder="alice" value="devlabs" />
+
+          <label for="note">Note (optional)</label>
+          <input id="note" name="note" placeholder="smoke test" />
+
+          <button type="submit" id="triggerBtn">Trigger</button>
+          <div class="msg" id="triggerMsg"></div>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Task logs</h2>
+        <div id="logs">Select a run and click Logs on a task.</div>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top: 1.5rem;">
+      <h2>DAGs</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>DAG ID</th>
+            <th>Active</th>
+            <th>Paused</th>
+            <th>Tags</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="dagsBody">
+          <tr><td colspan="5" class="sub">Loading…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" style="margin-top: 1.5rem;">
+      <h2>Runs <span class="sub" id="runsTitle">— select a DAG</span></h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Run ID</th>
+            <th>User</th>
+            <th>State</th>
+            <th>Started</th>
+            <th>Ended</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="runsBody">
+          <tr><td colspan="6" class="sub">Select “Runs” on a DAG.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" style="margin-top: 1.5rem;">
+      <h2>Tasks <span class="sub" id="tasksTitle">—</span></h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Task</th>
+            <th>State</th>
+            <th>Started</th>
+            <th>Ended</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tasksBody">
+          <tr><td colspan="5" class="sub">Select a run to see tasks.</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    const dagsBody = document.getElementById('dagsBody');
+    const runsBody = document.getElementById('runsBody');
+    const tasksBody = document.getElementById('tasksBody');
+    const logsEl = document.getElementById('logs');
+    const triggerMsg = document.getElementById('triggerMsg');
+    const dagSelect = document.getElementById('dagId');
+    const runsTitle = document.getElementById('runsTitle');
+    const tasksTitle = document.getElementById('tasksTitle');
+    const airflowLink = document.getElementById('airflowLink');
+
+    let selectedDag = null;
+    let selectedRun = null;
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, {
+        headers: { 'Content-Type': 'application/json', ...opts.headers },
+        ...opts,
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || res.statusText);
+      }
+      if (res.status === 204) return null;
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) return res.json();
+      return res.text();
+    }
+
+    function fmtTime(t) {
+      if (!t) return '—';
+      return new Date(t).toLocaleString();
+    }
+
+    function badgeClass(state) {
+      if (!state) return 'other';
+      const s = state.toUpperCase();
+      if (s === 'SUCCESS' || s === 'SUCCEEDED') return 'success';
+      if (s === 'FAILED') return 'failed';
+      if (s === 'RUNNING' || s === 'QUEUED') return 'running';
+      return 'other';
+    }
+
+    async function loadDags() {
+      const data = await api('/api/dags');
+      if (!data.dags.length) {
+        dagsBody.innerHTML = '<tr><td colspan="5" class="sub">No DAGs found.</td></tr>';
+        return;
+      }
+      dagSelect.innerHTML = data.dags.map(d => `<option value="${d.dagId}">${d.dagId}</option>`).join('');
+      dagsBody.innerHTML = data.dags.map(d => `
+        <tr>
+          <td><code>${d.dagId}</code></td>
+          <td>${d.isActive ? 'yes' : 'no'}</td>
+          <td>${d.isPaused ? 'yes' : 'no'}</td>
+          <td>${(d.tags || []).join(', ') || '—'}</td>
+          <td class="actions">
+            <button type="button" data-runs="${d.dagId}">Runs</button>
+            <button type="button" class="secondary" data-trigger="${d.dagId}">Trigger</button>
+          </td>
+        </tr>
+      `).join('');
+
+      dagsBody.querySelectorAll('[data-runs]').forEach(btn => {
+        btn.addEventListener('click', () => loadRuns(btn.dataset.runs));
+      });
+      dagsBody.querySelectorAll('[data-trigger]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          dagSelect.value = btn.dataset.trigger;
+          document.getElementById('triggerForm').scrollIntoView({ behavior: 'smooth' });
+        });
+      });
+    }
+
+    async function loadRuns(dagId) {
+      selectedDag = dagId;
+      selectedRun = null;
+      runsTitle.textContent = `for ${dagId}`;
+      tasksTitle.textContent = '—';
+      tasksBody.innerHTML = '<tr><td colspan="5" class="sub">Select a run.</td></tr>';
+      runsBody.innerHTML = '<tr><td colspan="6" class="sub">Loading…</td></tr>';
+      const data = await api(`/api/dags/${dagId}/runs`);
+      if (!data.runs.length) {
+        runsBody.innerHTML = '<tr><td colspan="6" class="sub">No runs yet.</td></tr>';
+        return;
+      }
+      runsBody.innerHTML = data.runs.map(r => `
+        <tr>
+          <td><code>${r.runId}</code></td>
+          <td>${r.user}</td>
+          <td><span class="badge ${badgeClass(r.state)}">${r.state || '—'}</span></td>
+          <td>${fmtTime(r.start)}</td>
+          <td>${fmtTime(r.end)}</td>
+          <td class="actions">
+            <button type="button" data-run="${r.runId}">Tasks</button>
+          </td>
+        </tr>
+      `).join('');
+      runsBody.querySelectorAll('[data-run]').forEach(btn => {
+        btn.addEventListener('click', () => loadTasks(dagId, btn.dataset.run));
+      });
+    }
+
+    async function loadTasks(dagId, runId) {
+      selectedDag = dagId;
+      selectedRun = runId;
+      tasksTitle.textContent = `${dagId} / ${runId}`;
+      tasksBody.innerHTML = '<tr><td colspan="5" class="sub">Loading…</td></tr>';
+      const data = await api(`/api/dags/${dagId}/runs/${runId}/tasks`);
+      if (!data.tasks.length) {
+        tasksBody.innerHTML = '<tr><td colspan="5" class="sub">No tasks yet.</td></tr>';
+        return;
+      }
+      tasksBody.innerHTML = data.tasks.map(t => `
+        <tr>
+          <td><code>${t.taskId}</code></td>
+          <td><span class="badge ${badgeClass(t.state)}">${t.state || '—'}</span></td>
+          <td>${fmtTime(t.start)}</td>
+          <td>${fmtTime(t.end)}</td>
+          <td class="actions">
+            <button type="button" data-task="${t.taskId}" data-try="${t.tryNumber || 1}">Logs</button>
+          </td>
+        </tr>
+      `).join('');
+      tasksBody.querySelectorAll('[data-task]').forEach(btn => {
+        btn.addEventListener('click', () => showLogs(dagId, runId, btn.dataset.task, btn.dataset.try));
+      });
+    }
+
+    async function showLogs(dagId, runId, taskId, tryNumber) {
+      logsEl.textContent = 'Loading logs…';
+      try {
+        const text = await api(`/api/dags/${dagId}/runs/${runId}/tasks/${taskId}/logs?try_number=${tryNumber}`);
+        logsEl.textContent = text;
+      } catch (e) {
+        logsEl.textContent = String(e.message || e);
+      }
+    }
+
+    document.getElementById('triggerForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      triggerMsg.textContent = '';
+      const btn = document.getElementById('triggerBtn');
+      btn.disabled = true;
+      const dagId = dagSelect.value;
+      try {
+        const body = {
+          user: document.getElementById('user').value.trim() || 'anonymous',
+          note: document.getElementById('note').value.trim() || null,
+        };
+        const res = await api(`/api/dags/${dagId}/runs`, { method: 'POST', body: JSON.stringify(body) });
+        triggerMsg.textContent = `Triggered ${res.run.runId}`;
+        await loadRuns(dagId);
+      } catch (err) {
+        triggerMsg.textContent = err.message || String(err);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('refreshBtn').addEventListener('click', async () => {
+      await loadDags();
+      if (selectedDag) await loadRuns(selectedDag);
+      if (selectedDag && selectedRun) await loadTasks(selectedDag, selectedRun);
+    });
+
+    (async function init() {
+      try {
+        const cfg = await api('/api/config');
+        airflowLink.href = cfg.airflowUiUrl;
+      } catch (_) {}
+      await loadDags();
+      setInterval(async () => {
+        if (selectedDag) {
+          await loadRuns(selectedDag);
+          if (selectedRun) await loadTasks(selectedDag, selectedRun);
+        }
+      }, 8000);
+    })();
+  </script>
+</body>
+</html>

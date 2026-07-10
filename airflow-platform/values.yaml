@@ -1,0 +1,159 @@
+# Apache Airflow Helm chart — Devlabs home-lab (Colima + k3s, Mac Mini M4)
+# Install: scripts/deploy.sh
+
+executor: LocalExecutor
+
+# Must match postgresql.auth below (chart defaults postgres/postgres otherwise)
+data:
+  metadataConnection:
+    user: airflow
+    pass: airflow
+    protocol: postgresql
+    host: airflow-postgresql
+    port: 5432
+    db: airflow
+    sslmode: disable
+
+images:
+  airflow:
+    repository: apache/airflow
+    tag: 2.9.3
+    pullPolicy: IfNotPresent
+
+airflowVersion: "2.9.3"
+
+config:
+  core:
+    load_examples: "False"
+  api:
+    auth_backends: airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
+  webserver:
+    workers: "2"
+
+# LocalExecutor — no Celery workers or Redis
+redis:
+  enabled: false
+
+flower:
+  enabled: false
+
+triggerer:
+  enabled: false
+
+statsd:
+  enabled: false
+
+pgbouncer:
+  enabled: false
+
+postgresql:
+  enabled: true
+  image:
+    repository: bitnamilegacy/postgresql
+    tag: 16.1.0-debian-11-r15
+  auth:
+    enablePostgresUser: true
+    username: airflow
+    password: airflow
+    postgresPassword: airflow
+    database: airflow
+  primary:
+    persistence:
+      enabled: true
+      storageClass: local-path
+      size: 5Gi
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 512Mi
+        cpu: 500m
+
+scheduler:
+  resources:
+    requests:
+      memory: 384Mi
+      cpu: 200m
+    limits:
+      memory: 768Mi
+      cpu: 500m
+  extraInitContainers:
+    - name: seed-platform-dags
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - |
+          set -eu
+          DAGS=/opt/airflow/dags
+          # Remove k8s ConfigMap atomic-mount debris (causes Airflow recursive DAG walk errors)
+          rm -rf "${DAGS}"/..20* "${DAGS}"/..data "${DAGS}"/platform "${DAGS}"/*/__pycache__
+          find "${DAGS}" -maxdepth 1 -type l -delete
+          # Copy real files only — ConfigMap mounts are symlinks; cp -L dereferences them
+          for f in /platform-dags/*.py; do
+            [ -e "$f" ] || continue
+            cp -Lf "$f" "${DAGS}/"
+          done
+      volumeMounts:
+        - name: platform-dags
+          mountPath: /platform-dags
+          readOnly: true
+        - name: dags
+          mountPath: /opt/airflow/dags
+  extraVolumes:
+    - name: platform-dags
+      configMap:
+        name: airflow-platform-dags
+
+webserver:
+  defaultUser:
+    enabled: true
+    role: Admin
+    username: admin
+    email: admin@devlabs.local
+    firstName: admin
+    lastName: user
+    password: admin
+  # Gunicorn restarts workers on navigation; default probes kill the pod mid-restart.
+  livenessProbe:
+    initialDelaySeconds: 60
+    timeoutSeconds: 10
+    failureThreshold: 10
+    periodSeconds: 30
+  readinessProbe:
+    initialDelaySeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 10
+    periodSeconds: 15
+  startupProbe:
+    timeoutSeconds: 20
+    failureThreshold: 30
+    periodSeconds: 10
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 200m
+    limits:
+      memory: 1536Mi
+      cpu: 500m
+  service:
+    type: NodePort
+    ports:
+      - name: airflow-ui
+        port: 8080
+        targetPort: 8080
+        nodePort: 30081
+
+dags:
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 2Gi
+    accessMode: ReadWriteOnce
+
+migrateDatabaseJob:
+  useHelmHooks: false
+
+createUserJob:
+  useHelmHooks: false

@@ -1,0 +1,61 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: JOB_NAME_PLACEHOLDER
+  namespace: NAMESPACE_PLACEHOLDER
+  labels:
+    app.kubernetes.io/name: devlabs-data-tools
+    app.kubernetes.io/part-of: devlabs-platform
+    devlabs.dev/task: generate-authoring
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: devlabs-data-tools
+        devlabs.dev/task: generate-authoring
+    spec:
+      restartPolicy: Never
+      serviceAccountName: devlabs-data-tools
+      containers:
+        - name: generate
+          image: IMAGE_PLACEHOLDER
+          imagePullPolicy: Always
+          command:
+            - python
+            - /app/scripts/run_authoring_generate.py
+          env:
+            - name: BUSINESS_DATE
+              value: "BUSINESS_DATE_PLACEHOLDER"
+            - name: NUM_STORES
+              value: "NUM_STORES_PLACEHOLDER"
+            - name: ROWS_PER_STORE
+              value: "ROWS_PER_STORE_PLACEHOLDER"
+            - name: MALFORMED_RATE
+              value: "MALFORMED_RATE_PLACEHOLDER"
+            - name: GEN_S3_PREFIX
+              value: "GEN_S3_PREFIX_PLACEHOLDER"
+            - name: DATA_S3_PREFIX
+              value: "DATA_S3_PREFIX_PLACEHOLDER"
+            - name: MINIO_ENDPOINT
+              value: "MINIO_ENDPOINT_PLACEHOLDER"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: devlabs-data-minio
+                  key: access-key
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: devlabs-data-minio
+                  key: secret-key
+            - name: MINIO_BUCKET
+              value: "MINIO_BUCKET_PLACEHOLDER"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi

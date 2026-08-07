@@ -26,7 +26,7 @@ This is **not** a long-running Spark standalone cluster (no always-on workers). 
 | Host | Mac Mini M4, 16 GB RAM, Apple Silicon |
 | OS | macOS 26.x |
 | Server user | `devlabs` |
-| LAN IP | `192.168.1.3` |
+| LAN IP | `192.168.1.9` |
 | Kubernetes | Colima + k3s (`colima start --cpu 4 --memory 8 --kubernetes`) |
 | Node name | `colima` |
 | Namespace | `spark` |
@@ -38,8 +38,8 @@ This is **not** a long-running Spark standalone cluster (no always-on workers). 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  MacBook (users)                                                         │
-│    http://192.168.1.3:30088  →  Job portal (submit / status / logs)     │
-│    http://192.168.1.3:30080  →  History Server (completed jobs)        │
+│    http://192.168.1.9:30088  →  Job portal (submit / status / logs)     │
+│    http://192.168.1.9:30080  →  History Server (completed jobs)        │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │ LAN (HTTP)
 ┌───────────────────────────────▼─────────────────────────────────────────┐
@@ -82,7 +82,7 @@ This is **not** a long-running Spark standalone cluster (no always-on workers). 
 | Component | Type | NodePort | Image / chart |
 |-----------|------|----------|----------------|
 | **spark-operator** | Helm | — | `spark-operator/spark-operator` 2.5.1 |
-| **spark-platform-api** | Deployment + Service | **30088** | `spark-platform-api:local` (built on Mac Mini) |
+| **spark-platform-api** | Deployment + Service | **30088** | Docker Hub image (built on laptop, pulled by cluster) |
 | **spark-history** | Deployment + Service | **30080** | `apache/spark:3.5.3` |
 | **spark-events** | PVC 10Gi | — | `local-path` (k3s default) |
 | **spark** (SA) | ServiceAccount | — | Created by Helm (`spark.serviceAccount.name=spark`) |
@@ -183,7 +183,7 @@ spec:
 On Mac Mini (after Colima/k8s is up):
 
 ```bash
-MAC_MINI_IP=192.168.1.3 scripts/deploy.sh
+MAC_MINI_IP=192.168.1.9 scripts/deploy.sh
 ```
 
 From MacBook (rsync + remote run):
@@ -191,12 +191,12 @@ From MacBook (rsync + remote run):
 ```bash
 rsync -az platforms/spark-platform/ devlabs-mini:~/spark-platform/
 ssh devlabs-mini 'bash -lc "export PATH=/opt/homebrew/bin:\$PATH; \
-  MAC_MINI_IP=192.168.1.3 ~/spark-platform-scripts/deploy.sh"'
+  MAC_MINI_IP=192.168.1.9 ~/spark-platform-scripts/deploy.sh"'
 ```
 
 Script actions:
 
-1. `docker build -t spark-platform-api:local` (Colima Docker)
+1. `docker build` + `docker push` Hub image (laptop Docker Desktop → cluster pull)
 2. Apply PVC, History Server, RBAC, API Deployment/Service
 3. Wait for rollouts
 
@@ -218,9 +218,9 @@ RBAC (`spark-platform-api` ServiceAccount): get/list/watch/create/delete `sparka
 
 | Service | URL | Purpose |
 |---------|-----|---------|
-| **Job portal** | http://192.168.1.3:30088 | Submit jobs, status, logs |
-| **History Server** | http://192.168.1.3:30080 | Completed application UIs |
-| **API health** | http://192.168.1.3:30088/api/health | `{"status":"ok","namespace":"spark"}` |
+| **Job portal** | http://192.168.1.9:30088 | Submit jobs, status, logs |
+| **History Server** | http://192.168.1.9:30080 | Completed application UIs |
+| **API health** | http://192.168.1.9:30088/api/health | `{"status":"ok","namespace":"spark"}` |
 
 ### Remote kubectl (optional)
 
@@ -234,7 +234,7 @@ For API port tunnel:
 
 ```sshconfig
 Host devlabs-mini
-  HostName 192.168.1.3
+  HostName 192.168.1.9
   User devlabs
   LocalForward 30088 127.0.0.1:30088
   LocalForward 30080 127.0.0.1:30080
@@ -250,17 +250,17 @@ Port **30088** serves **HTTP only** (no TLS).
 
 | Test | Result |
 |------|--------|
-| `curl http://192.168.1.3:30088/api/health` | ✅ 200 |
-| `curl https://192.168.1.3:30088/api/health` | ❌ SSL error |
+| `curl http://192.168.1.9:30088/api/health` | ✅ 200 |
+| `curl https://192.168.1.9:30088/api/health` | ❌ SSL error |
 | Browser with HTTPS upgrade / “Always use secure connections” | ❌ Often fails |
-| Browser with `http://192.168.1.3:30088` explicitly | ✅ Works |
+| Browser with `http://192.168.1.9:30088` explicitly | ✅ Works |
 
-**Do not** set System Settings → Proxies → Web proxy to `192.168.1.3:30088`. That is the app server, not a proxy. It appeared to work only because it forced plain HTTP.
+**Do not** set System Settings → Proxies → Web proxy to `192.168.1.9:30088`. That is the app server, not a proxy. It appeared to work only because it forced plain HTTP.
 
 **Recommended:**
 
 ```bash
-open http://192.168.1.3:30088
+open http://192.168.1.9:30088
 ```
 
 Turn off Chrome **“Always use secure connections”** if the browser upgrades to HTTPS.
@@ -284,7 +284,7 @@ Keep **all system proxies OFF**.
 ### Submit example
 
 ```bash
-curl -s -X POST http://192.168.1.3:30088/api/jobs \
+curl -s -X POST http://192.168.1.9:30088/api/jobs \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "pi-curl",
@@ -298,7 +298,7 @@ curl -s -X POST http://192.168.1.3:30088/api/jobs \
 ### List jobs
 
 ```bash
-curl -s http://192.168.1.3:30088/api/jobs | python3 -m json.tool
+curl -s http://192.168.1.9:30088/api/jobs | python3 -m json.tool
 ```
 
 ---
@@ -390,27 +390,28 @@ curl -s http://192.168.1.3:30088/api/jobs | python3 -m json.tool
 
 ```bash
 kubectl get pods,svc,pvc -n spark
-curl http://192.168.1.3:30088/api/health
-curl http://192.168.1.3:30088/api/jobs
+curl http://192.168.1.9:30088/api/health
+curl http://192.168.1.9:30088/api/jobs
 ```
 
 ### Redeploy API after code changes
 
 ```bash
-docker build -t spark-platform-api:local .
+docker build --platform linux/arm64 -t rithvikreddyalkanti/spark-platform-api:latest .
+docker push rithvikreddyalkanti/spark-platform-api:latest
 kubectl rollout restart deployment/spark-platform-api -n spark
 ```
 
 ### Full platform redeploy
 
 ```bash
-MAC_MINI_IP=192.168.1.3 scripts/deploy.sh
+MAC_MINI_IP=192.168.1.9 scripts/deploy.sh
 ```
 
 ### Remove a job
 
 ```bash
-curl -X DELETE http://192.168.1.3:30088/api/jobs/pi-test
+curl -X DELETE http://192.168.1.9:30088/api/jobs/pi-test
 # or
 kubectl delete sparkapplication pi-test -n spark
 ```
@@ -449,11 +450,11 @@ kubectl delete sparkapplication pi-test -n spark
 colima start --cpu 4 --memory 8 --kubernetes
 
 # Deploy / upgrade platform
-MAC_MINI_IP=192.168.1.3 scripts/deploy.sh
+MAC_MINI_IP=192.168.1.9 scripts/deploy.sh
 
 # User URLs
-open http://192.168.1.3:30088    # portal
-open http://192.168.1.3:30080    # history
+open http://192.168.1.9:30088    # portal
+open http://192.168.1.9:30080    # history
 
 # Operator sanity
 kubectl get sparkapplication -n spark

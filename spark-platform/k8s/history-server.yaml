@@ -41,7 +41,7 @@ spec:
               memory: 512Mi
             limits:
               cpu: 500m
-              memory: 1Gi
+              memory: 1280Mi
           volumeMounts:
             - name: spark-events
               mountPath: /mnt/spark-events

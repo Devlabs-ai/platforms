@@ -19,8 +19,8 @@ spec:
       serviceAccountName: spark-platform-api
       containers:
         - name: api
-          image: spark-platform-api:local
-          imagePullPolicy: IfNotPresent
+          image: IMAGE_PLACEHOLDER
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8080
@@ -30,7 +30,7 @@ spec:
             - name: SPARK_EVENT_LOG_DIR
               value: file:/mnt/spark-events
             - name: SPARK_HISTORY_UI_URL
-              value: http://192.168.1.3:30080
+              value: http://192.168.1.9:30080
             - name: SPARK_IMAGE
               value: apache/spark:3.5.3
             - name: SPARK_VERSION

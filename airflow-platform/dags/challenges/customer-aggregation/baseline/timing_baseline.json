@@ -1,0 +1,55 @@
+{
+  "schema_version": 2,
+  "status": "not_collected",
+  "note": "Populated by Airflow DAG benchmark_baseline_collect after repeated Spark runs on this cluster. spark_app_seconds excludes Kubernetes startup overhead.",
+  "data_volume": {
+    "hours": 48,
+    "rows_per_hour": 100000,
+    "total_rows": 4800000,
+    "hot_customer": "CUST_HOT_001",
+    "hot_customer_share": 0.5,
+    "normal_customers": 99
+  },
+  "collected_at": null,
+  "broken_job": {
+    "script": "jobs/customer_aggregation.py",
+    "runs": [],
+    "wall_clock_seconds_avg": null,
+    "wall_clock_seconds_min": null,
+    "wall_clock_seconds_max": null,
+    "spark_app_seconds_avg": null,
+    "spark_app_seconds_min": null,
+    "spark_app_seconds_max": null,
+    "shuffle_stage_seconds_avg": null,
+    "shuffle_task_skew_ratio_avg": null
+  },
+  "fixed_job": {
+    "script": "jobs/customer_aggregation_fixed.py",
+    "runs": [],
+    "wall_clock_seconds_avg": null,
+    "wall_clock_seconds_min": null,
+    "wall_clock_seconds_max": null,
+    "spark_app_seconds_avg": null,
+    "spark_app_seconds_min": null,
+    "spark_app_seconds_max": null,
+    "shuffle_stage_seconds_avg": null,
+    "shuffle_task_skew_ratio_avg": null
+  },
+  "acceptance_criteria": {
+    "note": "skew_ratio_reduction = broken_skew / fixed_skew (primary home-lab signal). min_speedup_ratio uses spark_app_seconds and may be <1 because the reference fix adds extra shuffle stages.",
+    "expected_customer_count": 100,
+    "broken_baseline_seconds_avg": null,
+    "fixed_baseline_seconds_avg": null,
+    "broken_spark_app_seconds_avg": null,
+    "fixed_spark_app_seconds_avg": null,
+    "broken_shuffle_skew_ratio_avg": null,
+    "fixed_shuffle_skew_ratio_avg": null,
+    "broken_shuffle_stage_seconds_avg": null,
+    "fixed_shuffle_stage_seconds_avg": null,
+    "skew_ratio_reduction": null,
+    "min_speedup_ratio": null,
+    "min_wall_clock_speedup_ratio": null,
+    "max_spark_app_seconds_after_fix": null,
+    "max_wall_clock_seconds_after_fix": null
+  }
+}

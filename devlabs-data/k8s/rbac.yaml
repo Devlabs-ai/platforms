@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: devlabs-data-tools
+  namespace: devlabs
+  labels:
+    app.kubernetes.io/name: devlabs-data-tools
+    app.kubernetes.io/part-of: devlabs-platform
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: devlabs-data-minio
+  namespace: devlabs
+  labels:
+    app.kubernetes.io/name: devlabs-data-tools
+    app.kubernetes.io/part-of: devlabs-platform
+type: Opaque
+stringData:
+  access-key: spark
+  secret-key: spark-s3-change-me

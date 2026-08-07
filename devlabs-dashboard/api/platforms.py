@@ -11,7 +11,7 @@ from typing import Any, Literal
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
-MAC_MINI_IP = os.environ.get("MAC_MINI_IP", "192.168.1.3")
+MAC_MINI_IP = os.environ.get("MAC_MINI_IP", "192.168.1.9")
 HTTP_TIMEOUT = float(os.environ.get("PROBE_TIMEOUT", "3"))
 
 Status = Literal["healthy", "degraded", "down", "not_deployed", "unknown"]

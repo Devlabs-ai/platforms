@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLATFORM_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-MAC_MINI_IP="${MAC_MINI_IP:-192.168.1.3}"
+MAC_MINI_IP="${MAC_MINI_IP:-192.168.1.9}"
 NAMESPACE="${MINIO_NAMESPACE:-minio}"
 RELEASE="${MINIO_RELEASE:-minio}"
 ROOT_USER="${MINIO_ROOT_USER:-devlabs}"

@@ -34,25 +34,44 @@ colima start --cpu 4 --memory 8 --kubernetes
 
 ## Deploy
 
-On the **Mac Mini** (this repo at `~/spark-platform`):
+Build on your **MacBook** → push to Docker Hub → cluster pulls the image
+(same pattern as `devlabs-data`; avoids Docker Desktop vs Colima image mismatch).
 
 ```bash
+docker login
 chmod +x scripts/deploy.sh
-MAC_MINI_IP=192.168.1.3 scripts/deploy.sh
+
+# kubectl must reach the Mini cluster (SSH tunnel + KUBECONFIG)
+export KUBECONFIG=~/.kube/mac-mini.yaml
+# keep tunnel open: ssh -N devlabs-mini
+
+MAC_MINI_IP=192.168.1.9 ./scripts/deploy.sh
+
+# optional pin:
+# SPARK_PLATFORM_API_IMAGE_TAG=2026-07-14 MAC_MINI_IP=192.168.1.9 ./scripts/deploy.sh
 ```
 
-From your **MacBook** (sync from the `devlabs-ai` org folder):
+Defaults:
+
+| Env | Default |
+|-----|---------|
+| `SPARK_PLATFORM_API_IMAGE_REPO` | `rithvikreddyalkanti/spark-platform-api` |
+| `SPARK_PLATFORM_API_IMAGE_TAG` | `latest` |
+| `SPARK_PLATFORM_API_PLATFORM` | `linux/arm64` |
+| `MAC_MINI_IP` | `192.168.1.9` |
+
+Skip build/push if the image is already on Hub and you only need to re-apply manifests:
 
 ```bash
-rsync -az platforms/spark-platform/ devlabs-mini:~/spark-platform/
-ssh devlabs-mini 'bash -lc "MAC_MINI_IP=192.168.1.3 ~/spark-platform/scripts/deploy.sh"'
+SPARK_PLATFORM_API_SKIP_BUILD=1 SPARK_PLATFORM_API_SKIP_PUSH=1 \
+  MAC_MINI_IP=192.168.1.9 ./scripts/deploy.sh
 ```
 
 ## Usage
 
 ### Web UI
 
-Open **http://192.168.1.3:30088** — submit a Pi job, watch status, view driver logs.
+Open **http://192.168.1.9:30088** — submit a Pi job, watch status, view driver logs.
 
 ### REST API
 
@@ -69,7 +88,7 @@ Open **http://192.168.1.3:30088** — submit a Pi job, watch status, view driver
 Example submit:
 
 ```bash
-curl -s -X POST http://192.168.1.3:30088/api/jobs \
+curl -s -X POST http://192.168.1.9:30088/api/jobs \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "pi-curl",
@@ -82,7 +101,7 @@ curl -s -X POST http://192.168.1.3:30088/api/jobs \
 
 ### History Server
 
-Completed jobs with event logging appear at **http://192.168.1.3:30080**.
+Completed jobs with event logging appear at **http://192.168.1.9:30080**.
 
 ## Resource notes (16 GB Mac Mini)
 
@@ -96,5 +115,5 @@ Completed jobs with event logging appear at **http://192.168.1.3:30080**.
 |---------|-----|
 | Job stuck with empty status | Operator not watching `spark` namespace — set `spark.jobNamespaces={spark}` |
 | FAILED: serviceaccount spark not found | `spark.serviceAccount.name=spark` on Helm chart |
-| API pod ImagePullBackOff | Run `docker build -t spark-platform-api:local .` on Mac Mini |
+| API pod ImagePullBackOff | Re-run `./scripts/deploy.sh` ( Hub image ); check `docker login` / pull secrets |
 | History Server empty | Jobs must use `spark.eventLog.dir` on the shared PVC (API does this automatically) |

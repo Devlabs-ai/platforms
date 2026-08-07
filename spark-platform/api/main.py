@@ -5,14 +5,14 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 NAMESPACE = os.environ.get("SPARK_NAMESPACE", "spark")
 EVENT_LOG_DIR = os.environ.get("SPARK_EVENT_LOG_DIR", "file:/mnt/spark-events")
@@ -21,9 +21,16 @@ SPARK_IMAGE = os.environ.get("SPARK_IMAGE", "apache/spark:3.5.3")
 SPARK_VERSION = os.environ.get("SPARK_VERSION", "3.5.3")
 DRIVER_SA = os.environ.get("SPARK_DRIVER_SA", "spark")
 
+# Default in-cluster MinIO (overridable per-job via spark_conf / hadoop_conf).
+MINIO_ENDPOINT = os.environ.get(
+    "SPARK_MINIO_ENDPOINT", "http://minio.minio.svc.cluster.local:9000"
+)
+MINIO_ACCESS_KEY = os.environ.get("SPARK_MINIO_ACCESS_KEY", "spark")
+MINIO_SECRET_KEY = os.environ.get("SPARK_MINIO_SECRET_KEY", "spark-s3-change-me")
+
 JOB_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 
-app = FastAPI(title="Spark Platform", version="1.0.0")
+app = FastAPI(title="Spark Platform", version="1.1.0")
 
 try:
     config.load_incluster_config()
@@ -39,17 +46,52 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 class JobSubmitRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=52, description="Kubernetes-safe job name")
     user: str = Field(default="anonymous", max_length=64)
-    main_class: str = Field(..., description="Spark main class")
-    jar: str = Field(
-        default="local:///opt/spark/examples/jars/spark-examples.jar",
+
+    # "Scala" (jar) or "Python" (main_application_file)
+    type: Literal["Scala", "Python"] = "Scala"
+
+    # Java / Scala (legacy SparkPi-style)
+    main_class: str | None = Field(default=None, description="Spark main class (Scala/Java)")
+    jar: str | None = Field(
+        default=None,
         description="Application jar path inside the Spark image",
     )
-    arguments: list[str] = Field(default_factory=lambda: ["10"])
+    arguments: list[str] = Field(default_factory=list)
+
+    # Python
+    main_application_file: str | None = Field(
+        default=None,
+        description="Python entrypoint (local:/// or s3a://)",
+    )
+    python_version: str = Field(default="3")
+    env: dict[str, str] = Field(default_factory=dict)
+    spark_conf: dict[str, str] = Field(default_factory=dict)
+    hadoop_conf: dict[str, str] = Field(default_factory=dict)
+    deps_py_files: list[str] = Field(
+        default_factory=list,
+        description="Optional --py-files / spark.yarn.dist.pyFiles style deps",
+    )
+
     executor_instances: int = Field(default=1, ge=1, le=4)
     driver_memory: str = "512m"
     executor_memory: str = "512m"
     driver_cores: int = Field(default=1, ge=1, le=2)
     executor_cores: int = Field(default=1, ge=1, le=2)
+
+    @model_validator(mode="after")
+    def _validate_payload(self) -> JobSubmitRequest:
+        if self.type == "Python":
+            if not self.main_application_file:
+                raise ValueError("main_application_file is required for Python jobs")
+        else:
+            if not self.main_class:
+                # Backward-compatible defaults for old SparkPi clients.
+                self.main_class = "org.apache.spark.examples.SparkPi"
+            if not self.jar:
+                self.jar = "local:///opt/spark/examples/jars/spark-examples.jar"
+            if not self.arguments:
+                self.arguments = ["10"]
+        return self
 
 
 def _now_iso() -> str:
@@ -83,23 +125,63 @@ def _job_summary(obj: dict[str, Any]) -> dict[str, Any]:
     state = app_state.get("state")
     name = meta.get("name", "")
     labels = meta.get("labels", {}) or {}
+    spark_app_id = status.get("sparkApplicationId") or None
+    history_base = HISTORY_UI_URL.rstrip("/")
+    history_app = f"{history_base}/history/{spark_app_id}" if spark_app_id else None
 
     return {
         "name": name,
         "user": labels.get("spark-platform.devlabs/user", "unknown"),
         "status": _normalize_status(state),
         "rawStatus": state,
+        "type": spec.get("type"),
         "attempts": status.get("executionAttempts", 0),
         "start": status.get("lastSubmissionAttemptTime"),
         "finish": status.get("terminationTime"),
         "error": app_state.get("errorMessage"),
         "mainClass": spec.get("mainClass"),
+        "mainApplicationFile": spec.get("mainApplicationFile"),
         "createdAt": meta.get("creationTimestamp"),
+        "applicationId": spark_app_id,
         "links": {
             "logs": f"/api/jobs/{name}/logs",
             "status": f"/api/jobs/{name}",
-            "history": HISTORY_UI_URL,
+            "history": history_base,
+            "historyApp": history_app,
         },
+    }
+
+
+def _env_list(env: dict[str, str]) -> list[dict[str, str]]:
+    return [{"name": k, "value": v} for k, v in env.items()]
+
+
+def _default_s3a_spark_conf() -> dict[str, str]:
+    return {
+        "spark.eventLog.enabled": "true",
+        "spark.eventLog.dir": EVENT_LOG_DIR,
+        "spark.jars.ivy": "/tmp/.ivy2",
+        "spark.sql.shuffle.partitions": "8",
+        "spark.sql.adaptive.enabled": "true",
+        "spark.hadoop.fs.s3a.endpoint": MINIO_ENDPOINT,
+        "spark.hadoop.fs.s3a.access.key": MINIO_ACCESS_KEY,
+        "spark.hadoop.fs.s3a.secret.key": MINIO_SECRET_KEY,
+        "spark.hadoop.fs.s3a.path.style.access": "true",
+        "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
+        "spark.hadoop.fs.s3a.connection.ssl.enabled": "false",
+        "spark.jars.packages": (
+            "org.apache.hadoop:hadoop-aws:3.3.4,"
+            "com.amazonaws:aws-java-sdk-bundle:1.12.262"
+        ),
+    }
+
+
+def _default_s3a_hadoop_conf() -> dict[str, str]:
+    return {
+        "fs.s3a.endpoint": MINIO_ENDPOINT,
+        "fs.s3a.access.key": MINIO_ACCESS_KEY,
+        "fs.s3a.secret.key": MINIO_SECRET_KEY,
+        "fs.s3a.path.style.access": "true",
     }
 
 
@@ -108,6 +190,66 @@ def _build_spark_application(body: JobSubmitRequest) -> dict[str, Any]:
     if not JOB_NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="name must be a valid DNS-1123 label")
 
+    volume_mounts = [{"name": "spark-events", "mountPath": "/mnt/spark-events"}]
+    volumes = [
+        {
+            "name": "spark-events",
+            "persistentVolumeClaim": {"claimName": "spark-events"},
+        }
+    ]
+
+    if body.type == "Python":
+        spark_conf = {**_default_s3a_spark_conf(), **body.spark_conf}
+        hadoop_conf = {**_default_s3a_hadoop_conf(), **body.hadoop_conf}
+        if body.deps_py_files:
+            spark_conf["spark.submit.pyFiles"] = ",".join(body.deps_py_files)
+
+        env = _env_list(body.env)
+        return {
+            "apiVersion": "sparkoperator.k8s.io/v1beta2",
+            "kind": "SparkApplication",
+            "metadata": {
+                "name": name,
+                "namespace": NAMESPACE,
+                "labels": {
+                    "spark-platform.devlabs/user": body.user[:63],
+                    "spark-platform.devlabs/managed-by": "spark-platform-api",
+                    "spark-platform.devlabs/type": "Python",
+                },
+            },
+            "spec": {
+                "type": "Python",
+                "pythonVersion": body.python_version,
+                "mode": "cluster",
+                "image": SPARK_IMAGE,
+                "imagePullPolicy": "IfNotPresent",
+                "sparkVersion": SPARK_VERSION,
+                "mainApplicationFile": body.main_application_file,
+                "arguments": body.arguments,
+                "sparkConf": spark_conf,
+                "hadoopConf": hadoop_conf,
+                "driver": {
+                    "cores": body.driver_cores,
+                    "memory": body.driver_memory,
+                    "serviceAccount": DRIVER_SA,
+                    "labels": {"spark-platform.devlabs/role": "driver"},
+                    "env": env,
+                    "volumeMounts": volume_mounts,
+                },
+                "executor": {
+                    "cores": body.executor_cores,
+                    "instances": body.executor_instances,
+                    "memory": body.executor_memory,
+                    "serviceAccount": DRIVER_SA,
+                    "env": env,
+                    "volumeMounts": volume_mounts,
+                },
+                "volumes": volumes,
+                "restartPolicy": {"type": "Never"},
+            },
+        }
+
+    # Scala / Java
     return {
         "apiVersion": "sparkoperator.k8s.io/v1beta2",
         "kind": "SparkApplication",
@@ -117,6 +259,7 @@ def _build_spark_application(body: JobSubmitRequest) -> dict[str, Any]:
             "labels": {
                 "spark-platform.devlabs/user": body.user[:63],
                 "spark-platform.devlabs/managed-by": "spark-platform-api",
+                "spark-platform.devlabs/type": "Scala",
             },
         },
         "spec": {
@@ -131,26 +274,23 @@ def _build_spark_application(body: JobSubmitRequest) -> dict[str, Any]:
             "sparkConf": {
                 "spark.eventLog.enabled": "true",
                 "spark.eventLog.dir": EVENT_LOG_DIR,
+                **body.spark_conf,
             },
             "driver": {
                 "cores": body.driver_cores,
                 "memory": body.driver_memory,
                 "serviceAccount": DRIVER_SA,
                 "labels": {"spark-platform.devlabs/role": "driver"},
-                "volumeMounts": [{"name": "spark-events", "mountPath": "/mnt/spark-events"}],
+                "env": _env_list(body.env),
+                "volumeMounts": volume_mounts,
             },
             "executor": {
                 "cores": body.executor_cores,
                 "instances": body.executor_instances,
                 "memory": body.executor_memory,
-                "volumeMounts": [{"name": "spark-events", "mountPath": "/mnt/spark-events"}],
+                "volumeMounts": volume_mounts,
             },
-            "volumes": [
-                {
-                    "name": "spark-events",
-                    "persistentVolumeClaim": {"claimName": "spark-events"},
-                }
-            ],
+            "volumes": volumes,
         },
     }
 
@@ -163,7 +303,6 @@ def _find_driver_pod(job_name: str) -> str | None:
     for pod in pods.items:
         if pod.metadata and pod.metadata.name:
             return pod.metadata.name
-    # fallback: name prefix
     pods = core_api.list_namespaced_pod(namespace=NAMESPACE)
     for pod in pods.items:
         if pod.metadata and pod.metadata.name and pod.metadata.name.startswith(f"{job_name}-driver"):
@@ -182,6 +321,7 @@ def platform_config() -> dict[str, str]:
         "namespace": NAMESPACE,
         "historyUiUrl": HISTORY_UI_URL,
         "sparkImage": SPARK_IMAGE,
+        "supportsPython": "true",
     }
 
 
@@ -223,7 +363,11 @@ def get_job(name: str) -> dict[str, Any]:
 
 @app.post("/api/jobs", status_code=201)
 def submit_job(body: JobSubmitRequest) -> dict[str, Any]:
-    manifest = _build_spark_application(body)
+    try:
+        manifest = _build_spark_application(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     name = manifest["metadata"]["name"]
     try:
         custom_api.create_namespaced_custom_object(
@@ -260,7 +404,6 @@ def delete_job(name: str) -> Response:
 
 @app.get("/api/jobs/{name}/logs")
 def job_logs(name: str, tail: int = Query(default=200, ge=1, le=5000)) -> PlainTextResponse:
-    # ensure job exists
     get_job(name)
     pod = _find_driver_pod(name)
     if not pod:

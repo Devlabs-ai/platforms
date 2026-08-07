@@ -1,6 +1,8 @@
 # Managed platforms (Kubernetes)
 
-Each subdirectory is an **independent git repository** with its own `README.md`, `scripts/deploy.sh`, and k8s manifests.
+Monorepo: **`git@github.com:Devlabs-ai/platforms.git`**
+
+Each subdirectory is a standalone deploy tree with its own `README.md`, `scripts/deploy.sh`, and k8s manifests.
 
 | Platform | NodePort(s) | Repo |
 |----------|-------------|------|
@@ -14,7 +16,7 @@ Deploy pattern (from the `devlabs-ai` org folder on your MacBook):
 
 ```bash
 rsync -az platforms/<name>/ devlabs-mini:~/<name>/
-ssh devlabs-mini 'bash -lc "MAC_MINI_IP=192.168.1.3 ~/<name>/scripts/deploy.sh"'
+ssh devlabs-mini 'bash -lc "MAC_MINI_IP=192.168.1.9 ~/<name>/scripts/deploy.sh"'
 ```
 
 See [../devlabs/docs/mac-mini-server-setup.md](../devlabs/docs/mac-mini-server-setup.md) for Colima/k3s setup and LAN URLs.

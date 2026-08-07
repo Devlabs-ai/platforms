@@ -15,8 +15,8 @@ from kubernetes.client.rest import ApiException
 
 from api.platforms import collect_infrastructure_status, collect_platform_status, platform_summary
 
-COLIMA_CPU = int(os.environ.get("COLIMA_CPU", "6"))
-COLIMA_MEMORY_GIB = float(os.environ.get("COLIMA_MEMORY_GIB", "12"))
+COLIMA_CPU = int(os.environ.get("COLIMA_CPU", "8"))
+COLIMA_MEMORY_GIB = float(os.environ.get("COLIMA_MEMORY_GIB", "12.5"))
 HOST_MEMORY_GIB = float(os.environ.get("HOST_MEMORY_GIB", "16"))
 
 PLATFORM_NAMES: dict[str, str] = {
@@ -343,7 +343,7 @@ def _cleanup_candidates(workloads: list[dict[str, Any]]) -> list[dict[str, str]]
             "namespace": "-",
             "name": "colima-vm",
             "phase": "-",
-            "action": f"Colima holds {COLIMA_MEMORY_GIB:.0f} GiB of {HOST_MEMORY_GIB:.0f} GiB host RAM",
+            "action": f"Colima holds {COLIMA_MEMORY_GIB:g} GiB of {HOST_MEMORY_GIB:g} GiB host RAM ({COLIMA_CPU} CPU)",
             "impact": "Avoid heavy macOS apps on the Mac Mini while cluster runs",
         }
     )

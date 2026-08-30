@@ -1,0 +1,358 @@
+#!/usr/bin/env python3
+"""
+Generate L1 Derive Revenue Column testcases for MinIO.
+
+Layout (local + MinIO under DATA_S3_PREFIX):
+  challenge/
+  starter/
+  solution/
+  testcases/<case-id>/{input,expected}/part-00000.parquet
+  manifest.json
+
+expected/ is written by solution/solve.py.
+Do not upload until the challenge has been reviewed (use --output-dir / --dry-run locally).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import random
+import shutil
+import sys
+import tempfile
+import uuid
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+_CHALLENGE_DIR = Path(__file__).resolve().parent
+if str(_CHALLENGE_DIR) not in sys.path:
+    sys.path.insert(0, str(_CHALLENGE_DIR))
+
+from solution.solve import write_expected  # noqa: E402
+
+DEFAULT_PREFIX = "challenges/l1-derive-revenue-column"
+DATA_SEED = int(os.environ.get("DATA_SEED", "42"))
+ALLOWED_CURRENCIES = ("USD", "EUR", "GBP")
+
+INPUT_SCHEMA = pa.schema(
+    [
+        ("transaction_id", pa.string()),
+        ("store_id", pa.int32()),
+        ("product_id", pa.int32()),
+        ("customer_id", pa.int32()),
+        ("quantity", pa.int32()),
+        ("unit_price", pa.decimal128(10, 2)),
+        ("discount_pct", pa.decimal128(5, 2)),
+        ("currency", pa.string()),
+        ("status", pa.string()),
+        ("transaction_timestamp", pa.timestamp("us", tz="UTC")),
+    ]
+)
+
+CASE_SPECS: list[dict[str, Any]] = [
+    {"id": "01-smoke-basic", "tier": "run", "rows": 40, "profile": "mix"},
+    {"id": "02-smoke-edges", "tier": "run", "rows": 60, "profile": "edges"},
+    {"id": "03-full-mix", "tier": "submit", "rows": 400, "profile": "mix"},
+    {"id": "04-full-zero-discount", "tier": "submit", "rows": 500, "profile": "zero_discount"},
+    {"id": "05-full-high-discount", "tier": "submit", "rows": 500, "profile": "high_discount"},
+    {"id": "06-full-qty-edges", "tier": "submit", "rows": 500, "profile": "qty_edges"},
+    {"id": "07-full-price-edges", "tier": "submit", "rows": 600, "profile": "price_edges"},
+    {"id": "08-full-balanced", "tier": "submit", "rows": 800, "profile": "mix"},
+    {"id": "09-full-stress", "tier": "submit", "rows": 2000, "profile": "mix"},
+]
+
+
+def _minio_client():
+    from minio import Minio
+
+    endpoint = os.environ.get("MINIO_ENDPOINT", "http://minio.minio.svc.cluster.local:9000")
+    access = os.environ.get("MINIO_ACCESS_KEY", "spark")
+    secret = os.environ.get("MINIO_SECRET_KEY", "spark-s3-change-me")
+    host = endpoint.replace("http://", "").replace("https://", "")
+    secure = endpoint.startswith("https")
+    return Minio(host, access_key=access, secret_key=secret, secure=secure)
+
+
+def _pick_price(rng: random.Random, profile: str) -> Decimal:
+    if profile == "price_edges":
+        return Decimal(str(rng.choice(["1.00", "1.99", "9.99", "49.50", "99.99"])))
+    if profile == "edges" and rng.random() < 0.35:
+        return Decimal(str(rng.choice(["1.00", "0.99", "99.99"])))
+    return Decimal(str(round(rng.uniform(1.0, 99.99), 2)))
+
+
+def _pick_discount(rng: random.Random, profile: str) -> Decimal:
+    if profile == "zero_discount":
+        return Decimal("0.00")
+    if profile == "high_discount":
+        return Decimal(str(rng.choice(["0.40", "0.45", "0.50"])))
+    if profile == "edges":
+        return Decimal(str(rng.choice(["0.00", "0.01", "0.10", "0.25", "0.50"])))
+    # mix / default — bias toward small discounts
+    return Decimal(str(round(rng.choice([0.0, 0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30]), 2)))
+
+
+def _pick_quantity(rng: random.Random, profile: str) -> int:
+    if profile == "qty_edges":
+        return rng.choice([1, 1, 2, 5, 10, 50, 99, 100])
+    if profile == "edges" and rng.random() < 0.4:
+        return rng.choice([1, 2, 99, 100])
+    return rng.randint(1, 100)
+
+
+def _base_row(rng: random.Random, business_day: datetime, profile: str) -> dict:
+    open_at = business_day.replace(hour=9, minute=0, second=0, microsecond=0)
+    ts = open_at + timedelta(seconds=rng.randint(0, 12 * 3600 - 1))
+    return {
+        "transaction_id": str(uuid.UUID(int=rng.getrandbits(128), version=4)),
+        "store_id": rng.randint(1, 50),
+        "product_id": rng.randint(1, 1000),
+        "customer_id": rng.randint(1, 50000),
+        "quantity": _pick_quantity(rng, profile),
+        "unit_price": _pick_price(rng, profile),
+        "discount_pct": _pick_discount(rng, profile),
+        "currency": rng.choice(ALLOWED_CURRENCIES),
+        "status": "COMPLETED",
+        "transaction_timestamp": ts,
+    }
+
+
+def generate_rows(*, n_rows: int, seed: int, profile: str) -> list[dict]:
+    rng = random.Random(seed)
+    business_day = datetime(2026, 1, 15, tzinfo=timezone.utc)
+    return [_base_row(rng, business_day, profile) for _ in range(n_rows)]
+
+
+def _rows_to_table(rows: list[dict]) -> pa.Table:
+    return pa.table(
+        {
+            "transaction_id": [r["transaction_id"] for r in rows],
+            "store_id": pa.array([r["store_id"] for r in rows], type=pa.int32()),
+            "product_id": pa.array([r["product_id"] for r in rows], type=pa.int32()),
+            "customer_id": pa.array([r["customer_id"] for r in rows], type=pa.int32()),
+            "quantity": pa.array([r["quantity"] for r in rows], type=pa.int32()),
+            "unit_price": pa.array([r["unit_price"] for r in rows], type=pa.decimal128(10, 2)),
+            "discount_pct": pa.array(
+                [r["discount_pct"] for r in rows], type=pa.decimal128(5, 2)
+            ),
+            "currency": [r["currency"] for r in rows],
+            "status": [r["status"] for r in rows],
+            "transaction_timestamp": pa.array(
+                [r["transaction_timestamp"] for r in rows],
+                type=pa.timestamp("us", tz="UTC"),
+            ),
+        },
+        schema=INPUT_SCHEMA,
+    )
+
+
+def _write_parquet_dir(dir_path: Path, rows: list[dict]) -> None:
+    dir_path.mkdir(parents=True, exist_ok=True)
+    pq.write_table(
+        _rows_to_table(rows), dir_path / "part-00000.parquet", compression="snappy"
+    )
+    (dir_path / "_SUCCESS").write_text("")
+
+
+def _stage_tree(output_root: Path, name: str, *, required: bool = True) -> list[str]:
+    src = _CHALLENGE_DIR / name
+    if not src.is_dir():
+        if required:
+            raise SystemExit(f"missing {name}/ directory: {src}")
+        return []
+    dest = output_root / name
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.copytree(
+        src,
+        dest,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"),
+    )
+    files = sorted(
+        p.relative_to(output_root).as_posix()
+        for p in dest.rglob("*")
+        if p.is_file()
+    )
+    print(f"==> staged {name}/ ({len(files)} files)")
+    for rel in files:
+        print(f"  {rel}")
+    return files
+
+
+def generate_local(output_root: Path) -> dict[str, Any]:
+    if output_root.exists():
+        for child in output_root.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    case_records: list[dict[str, Any]] = []
+    run_ids: list[str] = []
+    submit_ids: list[str] = []
+
+    for i, spec in enumerate(CASE_SPECS):
+        case_id = spec["id"]
+        tier = spec["tier"]
+        profile = str(spec["profile"])
+        seed = DATA_SEED + (i + 1) * 1009
+        rows = generate_rows(n_rows=int(spec["rows"]), seed=seed, profile=profile)
+        case_dir = output_root / "testcases" / case_id
+        _write_parquet_dir(case_dir / "input", rows)
+        expected_count = write_expected(case_dir / "input", case_dir / "expected")
+
+        if tier == "run":
+            run_ids.append(case_id)
+        else:
+            submit_ids.append(case_id)
+
+        case_records.append(
+            {
+                "id": case_id,
+                "tier": tier,
+                "profile": profile,
+                "input_rows": len(rows),
+                "expected_rows": expected_count,
+                "seed": seed,
+                "input": f"testcases/{case_id}/input/",
+                "expected": f"testcases/{case_id}/expected/",
+            }
+        )
+        print(
+            f"==> {case_id} ({tier}/{profile}): input={len(rows)} expected={expected_count}"
+        )
+
+    challenge_files = _stage_tree(output_root, "challenge")
+    starter_files = _stage_tree(output_root, "starter")
+    solution_files = _stage_tree(output_root, "solution")
+
+    manifest = {
+        "challenge_id": "l1-derive-revenue-column",
+        "content_source": "minio",
+        "data_seed": DATA_SEED,
+        "testcases_prefix": "testcases/",
+        "challenge_prefix": "challenge/",
+        "challenge_files": challenge_files,
+        "starter_prefix": "starter/",
+        "starter_files": starter_files,
+        "solution_prefix": "solution/",
+        "solution_files": solution_files,
+        "run_cases": run_ids,
+        "submit_cases": submit_ids,
+        "grade": {
+            "mode": "parquet_row_diff",
+            "keys": ["transaction_id"],
+            "per_testcase": True,
+        },
+        "testcases": case_records,
+        "formula": {
+            "revenue": "quantity * unit_price * (1 - discount_pct)",
+            "scale": "DECIMAL(12,2) ROUND_HALF_UP",
+        },
+    }
+    (output_root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    return manifest
+
+
+def clear_prefix(bucket: str, prefix: str) -> int:
+    from minio.deleteobjects import DeleteObject
+
+    client = _minio_client()
+    if not client.bucket_exists(bucket):
+        raise SystemExit(f"bucket does not exist: {bucket}")
+    root = prefix.rstrip("/") + "/"
+    removed = 0
+    for obj in client.list_objects(bucket, prefix=root, recursive=True):
+        client.remove_object(bucket, obj.object_name)
+        removed += 1
+    versions = list(
+        client.list_objects(bucket, prefix=root, recursive=True, include_version=True)
+    )
+    if versions:
+        errs = list(
+            client.remove_objects(
+                bucket,
+                [
+                    DeleteObject(
+                        o.object_name,
+                        version_id=(
+                            "null" if o.version_id in (None, "", "null") else o.version_id
+                        ),
+                    )
+                    for o in versions
+                ],
+            )
+        )
+        for e in errs:
+            raise SystemExit(f"version purge failed: {e}")
+        removed += len(versions)
+    print(f"==> cleared under s3://{bucket}/{root} (touched≈{removed})")
+    return removed
+
+
+def upload_tree(local_root: Path, bucket: str, prefix: str) -> None:
+    client = _minio_client()
+    if not client.bucket_exists(bucket):
+        raise SystemExit(f"bucket does not exist: {bucket}")
+    for path in sorted(local_root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(local_root).as_posix()
+        key = f"{prefix.rstrip('/')}/{rel}"
+        client.fput_object(bucket, key, str(path))
+        print(f"  uploaded s3://{bucket}/{key}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate L1 derive-revenue-column testcases"
+    )
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--bucket", default=os.environ.get("MINIO_BUCKET", "devlabs-data"))
+    parser.add_argument(
+        "--prefix", default=os.environ.get("DATA_S3_PREFIX", DEFAULT_PREFIX)
+    )
+    args = parser.parse_args()
+
+    print(
+        f"==> generating l1-derive-revenue-column cases={len(CASE_SPECS)} DATA_SEED={DATA_SEED}"
+    )
+
+    if args.output_dir:
+        out = args.output_dir
+        tmp = None
+    else:
+        tmp = tempfile.TemporaryDirectory(prefix="l1-derive-revenue-")
+        out = Path(tmp.name)
+
+    try:
+        manifest = generate_local(out)
+        print(f"==> wrote under {out}")
+        print(
+            f"==> run_cases={manifest['run_cases']} submit_cases={manifest['submit_cases']}"
+        )
+        if args.dry_run or args.output_dir:
+            return
+        print(f"==> uploading to s3://{args.bucket}/{args.prefix}")
+        clear_prefix(args.bucket, args.prefix)
+        upload_tree(out, args.bucket, args.prefix)
+        print("DATA_UPLOAD_OK")
+    finally:
+        if tmp is not None:
+            tmp.cleanup()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        raise SystemExit(130)

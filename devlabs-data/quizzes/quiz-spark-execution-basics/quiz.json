@@ -1,0 +1,54 @@
+{
+  "id": "quiz-spark-execution-basics",
+  "title": "Spark Execution Basics",
+  "kind": "quiz",
+  "contentSource": "minio",
+  "learningOutcome": "Trace Spark execution from SparkSession + config through lazy transforms to the action that creates Jobs, Stages, Tasks, and Executors",
+  "description": "Understanding Spark Internals · Episode 1. Read a frozen exhibit that builds SparkSession with executor cores/memory, applies lazy transformations, then an action. Answer questions in that same order. History Server confirms the Job. Pass ≥ 80%.",
+  "difficulty": "L1",
+  "tags": ["spark", "l1", "quiz", "history-server", "internals"],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "sideQuest": {
+    "title": "Understanding Spark Internals",
+    "subtitle": "Episode 1 · Execution Basics"
+  },
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "overview": "Using a frozen History Server application for a narrow-only Acme pipeline, explain Spark jobs, stages, tasks, executors, and lazy evaluation.",
+    "symptoms": [
+      "Learners can write DataFrame code but cannot read what Spark actually ran.",
+      "Extra mid-pipeline actions (count/show) are misunderstood as free."
+    ],
+    "yourTaskSteps": [
+      "Open the frozen submission’s History Server application page.",
+      "Inspect Jobs, Stages, Tasks, and Executors for this exhibit.",
+      "Answer the graded questions in questions.json (terminology + exhibit facts).",
+      "Score at least 80% (8 of 10) to pass."
+    ],
+    "yourTask": "Pass the Spark Execution Basics quiz from the frozen History Server exhibit.",
+    "hints": [
+      "filter and withColumn are transformations; write is an action.",
+      "One action usually creates one Job on the Jobs tab.",
+      "Task count tracks partitions; executor count is the worker pool size."
+    ]
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "kind": "quiz",
+    "questionsKey": "quizzes/quiz-spark-execution-basics/questions.json",
+    "fixtureKey": "quizzes/quiz-spark-execution-basics/fixture.md",
+    "exhibitCodeKey": "quizzes/quiz-spark-execution-basics/exhibit/src/main.py",
+    "quizKey": "quizzes/quiz-spark-execution-basics/quiz.md",
+    "passScore": 0.8,
+    "limits": {
+      "driver": 1,
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g"
+    }
+  }
+}

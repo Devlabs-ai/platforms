@@ -1,0 +1,128 @@
+{
+  "id": "l1-aggregate-product-totals",
+  "number": 5,
+  "title": "Aggregate Product Totals",
+  "contentSource": "minio",
+  "description": "Store managers don\u2019t want every receipt \u2014 they want one line per product for the day: units moved, money in after discounts, how many tickets touched that SKU, and how many stores sold it.\n\nRead the input Parquet, group by `product_id`, and write one summary row per product as Parquet with overwrite. Line revenue uses the same formula as Derive Revenue Column: `quantity * unit_price * (1 - discount_pct)`, rounded half-up to 2 decimals per line, then summed.\n\nOutput columns: `product_id`, `total_units` (sum of quantity), `total_revenue` (sum of line revenue as DECIMAL(12,2)), `txn_count` (row count), `store_count` (countDistinct store_id). Do not keep leftover input columns.\n\nInput columns: `txn_id`, `product_id`, `store_id`, `quantity`, `unit_price`, `discount_pct` (fraction in [0, 0.50]). Implement with Spark DataFrame `groupBy` / `agg` \u2014 no Python loops over collected rows. **Run** uses two smoke testcases; **Submit** uses the full set and row-diffs your Parquet against each case\u2019s `expected/`.\n\nWrite results with `df.write.mode(\"overwrite\").parquet(OUTPUT_PATH)`. `OUTPUT_PATH` is set by the platform for **this Run/Submit only**.",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "aggregation",
+    "groupby",
+    "dataframe",
+    "parquet"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "overview": "Group by product_id; emit total_units, total_revenue (with discount), txn_count, store_count; write Parquet to OUTPUT_PATH.",
+    "symptoms": [
+      "Managers re-sum every receipt in BI instead of a product-level daily rollup.",
+      "Discounted lines must use quantity * unit_price * (1 - discount_pct), not list price."
+    ],
+    "yourTaskSteps": [
+      "Read input Parquet from INPUT_PATH (platform stages selected testcase inputs).",
+      "Compute per-line revenue with discount, round half-up to 2 decimals, then aggregate by product_id.",
+      "Write exactly product_id, total_units, total_revenue, txn_count, store_count to OUTPUT_PATH with overwrite.",
+      "Submit is graded with a row-level compare against each selected testcase expected/."
+    ],
+    "yourTask": "Implement src/main.py that aggregates product totals (with discounts) and writes Parquet output.",
+    "hints": [
+      "line_revenue = quantity * unit_price * (1 - discount_pct); round to 2 decimals before summing.",
+      "groupBy(\"product_id\").agg(sum(...), count(...), countDistinct(\"store_id\")).",
+      "discount_pct is a fraction (0.10 = 10%), already between 0 and 0.50.",
+      "spark.read.parquet(INPUT_PATH) reads every staged testcase file."
+    ],
+    "inputSchema": [
+      {
+        "column": "txn_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "quantity",
+        "type": "INT"
+      },
+      {
+        "column": "unit_price",
+        "type": "DECIMAL(12,2)"
+      },
+      {
+        "column": "discount_pct",
+        "type": "DECIMAL(5,4)"
+      }
+    ],
+    "expectedOutput": [
+      {
+        "column": "product_id",
+        "description": "Group key"
+      },
+      {
+        "column": "total_units",
+        "description": "sum(quantity)"
+      },
+      {
+        "column": "total_revenue",
+        "description": "sum of per-line rounded revenue with discount (DECIMAL(12,2))"
+      },
+      {
+        "column": "txn_count",
+        "description": "count of input rows in the group"
+      },
+      {
+        "column": "store_count",
+        "description": "countDistinct(store_id)"
+      }
+    ]
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-aggregate-product-totals/testcases/",
+    "runCases": [
+      "01-smoke-basic",
+      "02-smoke-edges"
+    ],
+    "submitCases": [
+      "03-full-mix",
+      "04-full-zero-discount",
+      "05-full-high-discount",
+      "06-full-qty-edges",
+      "07-full-multi-store",
+      "08-full-balanced",
+      "09-full-stress"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-aggregate-product-totals/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-aggregate-product-totals/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "product_id"
+    ],
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g"
+    },
+    "gradeChecks": [
+      "Spark job succeeds on selected Submit testcases",
+      "OUTPUT_PATH Parquet readable with product_id, total_units, total_revenue, txn_count, store_count",
+      "Each Submit testcase expected/ matches candidate rows (key + values)",
+      "No extra rows beyond the union of selected expected testcases"
+    ]
+  }
+}

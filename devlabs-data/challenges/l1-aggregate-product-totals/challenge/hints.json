@@ -1,0 +1,8 @@
+[
+  "line_revenue = quantity * unit_price * (1 - discount_pct); round half-up to 2 decimals before summing.",
+  "groupBy(\"product_id\").agg(sum(...), count(...), countDistinct(\"store_id\")).",
+  "discount_pct is a fraction (0.10 = 10%), already between 0 and 0.50.",
+  "Keep only the five summary columns — drop txn_id and other inputs after the agg.",
+  "spark.read.parquet(INPUT_PATH) reads every staged testcase file.",
+  "OUTPUT_PATH is unique per Run/Submit — overwrite does not clear prior jobs' results."
+]

@@ -5,9 +5,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY scripts/ ./scripts/
+COPY lib/ ./lib/
+COPY challenges/ ./challenges/
 
 ENV PYTHONUNBUFFERED=1
 
-# Jobs may override via `command:` (see k8s/job-generate-*.yaml).
-CMD ["python", "/app/scripts/generate_daily_product_sales_data.py"]
+# Jobs override via `command:` (see challenges/<id>/job.yaml).
+CMD ["python", "/app/challenges/daily-product-sales-pipeline-l1/generate.py"]

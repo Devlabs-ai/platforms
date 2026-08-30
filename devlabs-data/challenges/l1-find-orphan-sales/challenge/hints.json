@@ -1,0 +1,7 @@
+[
+  "sales.join(products, on=\"product_id\", how=\"left_anti\")",
+  "left_anti keeps left rows with no match and does not add right-side columns.",
+  "left_semi is the opposite filter (exists); left keeps all sales with nullable names.",
+  "Read products from os.environ[\"PRODUCTS_PATH\"].",
+  "spark.read.parquet(INPUT_PATH) reads every staged sales testcase file."
+]

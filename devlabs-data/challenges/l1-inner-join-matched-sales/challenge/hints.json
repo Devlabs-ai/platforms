@@ -1,0 +1,8 @@
+[
+  "sales.join(products, on=\"product_id\", how=\"inner\")",
+  "A left join would keep orphan sales with product_name null — that fails this lab.",
+  "Product keys are unique — one output row per matched sales row.",
+  "broadcast(products) is allowed but not required.",
+  "Read products from os.environ[\"PRODUCTS_PATH\"].",
+  "spark.read.parquet(INPUT_PATH) reads every staged sales testcase file."
+]

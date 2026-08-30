@@ -84,6 +84,10 @@ Open **http://192.168.1.9:30088** — submit a Pi job, watch status, view driver
 | POST | `/api/jobs` | Submit job (JSON body) |
 | GET | `/api/jobs/{name}/logs` | Driver pod logs |
 | DELETE | `/api/jobs/{name}` | Delete SparkApplication |
+| GET | `/api/watcher` | Job watcher on/off |
+| PUT | `/api/watcher` | `{ "enabled": false }` pauses hard-timeout kills |
+
+A background **job watcher** (every 5s) kills managed SparkApplications whose Spark runtime exceeds `hard_timeout_seconds` (submit field, default `SPARK_JOB_HARD_TIMEOUT_SECONDS=600`). The clock starts when the driver pod starts (stamped as `spark-platform.devlabs/running-since`). If the driver never starts, the clock is SparkApplication creation so a stuck submit is still reaped. Disable it from DevLabs Profile → Admin settings while testing. `GET /api/jobs/{name}` then returns `FAILED` with error `Hard threshold has reached so killing this Job` so the backend poller can surface it.
 
 Example submit:
 

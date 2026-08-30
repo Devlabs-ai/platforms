@@ -1,0 +1,8 @@
+[
+  "sales.join(products, on=\"product_id\", how=\"left\")",
+  "An inner join would quietly drop sales rows whose product_id is not in the catalog.",
+  "Product keys are unique — you should get one output row per sales row.",
+  "broadcast(products) is allowed but not required.",
+  "Read products from os.environ[\"PRODUCTS_PATH\"].",
+  "spark.read.parquet(INPUT_PATH) reads every staged sales testcase file."
+]

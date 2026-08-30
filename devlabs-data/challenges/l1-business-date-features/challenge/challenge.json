@@ -1,0 +1,125 @@
+{
+  "id": "l1-business-date-features",
+  "number": 4,
+  "title": "Business Date Features",
+  "contentSource": "minio",
+  "description": "Acme\u2019s POS dump stores event times as strings. Weekend dashboards and lag reports need calendar fields derived in Spark \u2014 not re-parsed in every BI query.\n\nRead the input Parquet, append date features on every row, and write Parquet with overwrite. Keep every input column unchanged; only add the derived columns.\n\nDerive in order: (1) `business_date` = calendar date of `event_ts` via `to_date`, (2) `sale_year` / `sale_month` from that date, (3) `day_of_week` using Spark `dayofweek` (1 = Sunday \u2026 7 = Saturday), (4) `is_weekend` true when `day_of_week` is 1 or 7, (5) `days_to_as_of` = `datediff(as_of, business_date)` where `as_of` comes from the job env `BUSINESS_DATE` (platform sets `2024-06-15`).\n\nInput columns: `txn_id`, `store_id`, `product_id`, `event_ts` (string `yyyy-MM-dd HH:mm:ss`). Implement with Spark DataFrame / `pyspark.sql.functions` \u2014 no Python date loops over collected rows. **Run** uses two smoke testcases; **Submit** uses the full set and row-diffs your Parquet against each case\u2019s `expected/`.\n\nWrite results with `df.write.mode(\"overwrite\").parquet(OUTPUT_PATH)`. `OUTPUT_PATH` is set by the platform for **this Run/Submit only**.",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "dates",
+    "datetime",
+    "dataframe",
+    "parquet"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "overview": "Append business_date, sale_year, sale_month, day_of_week, is_weekend, and days_to_as_of from event_ts; write Parquet to OUTPUT_PATH.",
+    "symptoms": [
+      "Weekend vs weekday dashboards re-parse event_ts in every query.",
+      "Lag reports need a stable days-to-as-of column vs the job BUSINESS_DATE."
+    ],
+    "yourTaskSteps": [
+      "Read input Parquet from INPUT_PATH (platform stages selected testcase inputs).",
+      "Append the six date-feature columns using Spark date functions and BUSINESS_DATE.",
+      "Preserve txn_id, store_id, product_id, event_ts; write Parquet to OUTPUT_PATH with overwrite.",
+      "Submit is graded with a row-level compare against each selected testcase expected/."
+    ],
+    "yourTask": "Implement src/main.py that derives calendar features from event_ts and writes Parquet output.",
+    "hints": [
+      "to_date(col(\"event_ts\")) yields the calendar DATE used by year/month/dayofweek.",
+      "Spark dayofweek: 1 = Sunday \u2026 7 = Saturday \u2014 document it; don\u2019t assume ISO Monday=1.",
+      "days_to_as_of = datediff(to_date(lit(os.environ[\"BUSINESS_DATE\"])), col(\"business_date\")).",
+      "spark.read.parquet(INPUT_PATH) reads every staged testcase file."
+    ],
+    "inputSchema": [
+      {
+        "column": "txn_id",
+        "type": "INT"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "event_ts",
+        "type": "STRING"
+      }
+    ],
+    "expectedOutput": [
+      {
+        "column": "business_date",
+        "description": "DATE from to_date(event_ts)"
+      },
+      {
+        "column": "sale_year",
+        "description": "INT year of business_date"
+      },
+      {
+        "column": "sale_month",
+        "description": "INT month 1\u201312"
+      },
+      {
+        "column": "day_of_week",
+        "description": "INT Spark dayofweek (1=Sun \u2026 7=Sat)"
+      },
+      {
+        "column": "is_weekend",
+        "description": "BOOLEAN true when day_of_week in (1, 7)"
+      },
+      {
+        "column": "days_to_as_of",
+        "description": "INT datediff(BUSINESS_DATE, business_date)"
+      }
+    ]
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "businessDate": "2024-06-15",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-business-date-features/testcases/",
+    "runCases": [
+      "01-smoke-basic",
+      "02-smoke-edges"
+    ],
+    "submitCases": [
+      "03-full-mix",
+      "04-full-weekends",
+      "05-full-lag",
+      "06-full-month-edges",
+      "07-full-year-span",
+      "08-full-balanced",
+      "09-full-stress"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-business-date-features/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-business-date-features/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "txn_id"
+    ],
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g"
+    },
+    "gradeChecks": [
+      "Spark job succeeds on selected Submit testcases",
+      "OUTPUT_PATH Parquet readable with input columns plus the six date features",
+      "Each Submit testcase expected/ matches candidate rows (key + values)",
+      "No extra rows beyond the union of selected expected testcases"
+    ]
+  }
+}

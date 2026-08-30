@@ -1,0 +1,7 @@
+[
+  "Chain trim → upper → regexp_replace for separators → regexp_replace to keep [A-Z0-9-].",
+  "Prefer withColumn(\"product_code\", …) so you overwrite the same field.",
+  "A separator pattern like [\\s_-]+ → '-' works after uppercasing.",
+  "spark.read.parquet(INPUT_PATH) reads every staged testcase file.",
+  "OUTPUT_PATH is unique per Run/Submit — overwrite does not clear prior jobs' results."
+]

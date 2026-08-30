@@ -9,3 +9,14 @@ __pycache__/
 .idea/
 .vscode/
 *.log
+
+# Local venv — never ship
+devlabs-data/.venv/
+
+# Generated lake data lives in MinIO (bucket `devlabs-data`), not git.
+# Keep generate.py / challenge.json / starter / solution in the repo.
+**/*.parquet
+**/_SUCCESS
+**/_out/
+**/_docker_test/
+**/_local_input/

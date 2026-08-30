@@ -1,0 +1,56 @@
+{
+  "id": "quiz-spark-orderby-oom",
+  "title": "OrderBy Shuffle & Executor OOM",
+  "kind": "quiz",
+  "contentSource": "minio",
+  "learningOutcome": "Postmortem a failed nightly sorted export: explain why orderBy + coalesce(1) + collect_list under 512m executor memory OOMs",
+  "description": "Acme needs one Parquet file of the day’s events, globally sorted by amount, for the warehouse loader. The job that does orderBy → coalesce(1) → collect_list(entire partition) on 2×512m executors OOMs on the real drop. This Side Quest is the postmortem: five reasoning questions on how that plan ran and why the executor died. Pass ≥ 80% (4 of 5).",
+  "difficulty": "L2",
+  "tags": ["spark", "l2", "quiz", "history-server", "internals", "orderby", "shuffle", "memory", "oom"],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "sideQuest": {
+    "title": "Understanding Spark Internals",
+    "subtitle": "Episode 2 · OrderBy OOM"
+  },
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "overview": "Incident: Acme’s nightly “one sorted Parquet file” events export failed with executor OOM on a 512m trail. Using the frozen FAILED History Server app, explain how orderBy + coalesce(1) + collect_list ran and why that heap was not enough.",
+    "symptoms": [
+      "Warehouse loader requires one globally sorted events Parquet — not many part files.",
+      "The job (orderBy → coalesce(1) → collect_list “checksum” → write) works on a sample and dies on the full drop.",
+      "On-call sees FAILED / Java heap space and assumes “Spark is broken” instead of reading the plan."
+    ],
+    "yourTaskSteps": [
+      "Read the frozen exhibit (session → orderBy → coalesce(1) → collect_list → write).",
+      "Open the frozen History Server app (status should be FAILED).",
+      "Answer five reasoning questions (no trivia from reading config lines).",
+      "Score at least 80% (4 of 5) to pass."
+    ],
+    "yourTask": "Complete the postmortem quiz for the failed sorted-export job.",
+    "hints": [
+      "Ask where the collect_list buffer lives for a coalesced partition — executor heap, not the driver.",
+      "A sample succeeding does not prove the plan fits 512m at full scale.",
+      "History should show Java heap space on the aggregation task — not a green job with an empty path."
+    ]
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "kind": "quiz",
+    "questionsKey": "quizzes/quiz-spark-orderby-oom/questions.json",
+    "fixtureKey": "quizzes/quiz-spark-orderby-oom/fixture.md",
+    "exhibitCodeKey": "quizzes/quiz-spark-orderby-oom/exhibit/src/main.py",
+    "quizKey": "quizzes/quiz-spark-orderby-oom/quiz.md",
+    "passScore": 0.8,
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "512m"
+    }
+  }
+}

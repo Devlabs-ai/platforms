@@ -1,0 +1,254 @@
+{
+  "id": "l3-interchange-fee-settlement",
+  "number": 18,
+  "title": "Interchange Fee Settlement Summary",
+  "contentSource": "minio",
+  "description": "Helix Payments is a payment network. One of their products is an interchange fee summary of all the merchants in a country and mode of card transaction.\n\nInterchange is the fee on an approved card payment. The rate depends on merchant category (`mcc`), country (`country_code`), and how the card was presented (`entry_mode` \u2014 chip, swipe, or contactless). Each rate is valid only between `effective_from` and `effective_to`.\n\nOnly approved payments (`response_code == \"00\"`) are in scope. Each of those payments must be priced with the rate that matches `(mcc, country_code, entry_mode)` and whose window contains the payment date:\n\n```\ninterchange_fee = round(amount * rate_bps / 10000 + fixed_fee, 2)\n```\n\nApproved payments with no matching rate are out of scope. Helix cannot publish a fee without a rate.\n\n**Run** uses a 20,000-row sample and a pruned rate card so you can check the CSV quickly. **Submit** uses the shared 100 million payment drop.\n\nThe output is one row per `(country_code, entry_mode)`:\n\n| Column | Meaning |\n| --- | --- |\n| `txn_count` | How many payments were priced in the group |\n| `total_fee` | Sum of `interchange_fee` in the group |\n| `distinct_rate_versions_used` | How many distinct `rate_id`s were used in the group |\n",
+  "difficulty": "L2",
+  "tags": [
+    "spark",
+    "l2",
+    "joins",
+    "skew",
+    "range-join",
+    "settlement",
+    "csv"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "hints": [],
+    "data": {
+      "overview": "Helix Payments publishes an interchange fee summary by country and card presentment. Two Parquet drops: 100 million card payments (~3.60 GB) and a 682,500-row interchange rate card (~11.9 MB). Price approved payments with the rate that was in effect on the payment date. Run uses a 20,000-row sample and a pruned rate card; Submit uses the full drops.",
+      "datasets": [
+        {
+          "name": "Transactions",
+          "env": "TXN_INPUT_PATH",
+          "kind": "fact",
+          "distribution": "100 million authorization rows over roughly half a year. Approvals dominate: 88 million of 100 million. One (MCC, country, entry mode) combination \u2014 grocery in the US on chip (5411, US, chip) \u2014 is 66 million of those approvals (75%), about 909\u00d7 the next key. The other 5,250 keys sit around a median of ~1.6k rows. Joins and aggregations that hash on that composite key send a single task the majority of the work.",
+          "schema": [
+            {
+              "column": "txn_id",
+              "type": "STRING"
+            },
+            {
+              "column": "txn_ts",
+              "type": "TIMESTAMP"
+            },
+            {
+              "column": "card_number",
+              "type": "STRING"
+            },
+            {
+              "column": "amount",
+              "type": "DECIMAL(14,2)"
+            },
+            {
+              "column": "currency_code",
+              "type": "STRING"
+            },
+            {
+              "column": "country_code",
+              "type": "STRING"
+            },
+            {
+              "column": "mcc",
+              "type": "STRING"
+            },
+            {
+              "column": "merchant_id",
+              "type": "STRING"
+            },
+            {
+              "column": "acquirer_bin",
+              "type": "STRING"
+            },
+            {
+              "column": "response_code",
+              "type": "STRING"
+            },
+            {
+              "column": "entry_mode",
+              "type": "STRING"
+            },
+            {
+              "column": "channel",
+              "type": "STRING"
+            },
+            {
+              "column": "merchant_country",
+              "type": "STRING"
+            },
+            {
+              "column": "auth_code",
+              "type": "STRING"
+            },
+            {
+              "column": "settled",
+              "type": "BOOLEAN"
+            }
+          ],
+          "rowCount": 50000000,
+          "sizeBytes": 1798187969,
+          "format": "Parquet (Snappy)"
+        },
+        {
+          "name": "Interchange rate card",
+          "env": "RATE_INPUT_PATH",
+          "kind": "dim",
+          "distribution": "Weekly effective schedules per (MCC, country, entry mode) spanning a couple of years. 682,500 versioned rows \u2014 11.9 MB on disk, large enough that Spark will not auto-broadcast it at the default 10 MB threshold. Windows are adjacent weeks, not overlapping.",
+          "schema": [
+            {
+              "column": "rate_id",
+              "type": "STRING"
+            },
+            {
+              "column": "mcc",
+              "type": "STRING"
+            },
+            {
+              "column": "country_code",
+              "type": "STRING"
+            },
+            {
+              "column": "entry_mode",
+              "type": "STRING"
+            },
+            {
+              "column": "effective_from",
+              "type": "DATE"
+            },
+            {
+              "column": "effective_to",
+              "type": "DATE"
+            },
+            {
+              "column": "rate_bps",
+              "type": "INT"
+            },
+            {
+              "column": "fixed_fee",
+              "type": "DECIMAL(6,4)"
+            },
+            {
+              "column": "program_code",
+              "type": "STRING"
+            },
+            {
+              "column": "program_name",
+              "type": "STRING"
+            }
+          ],
+          "rowCount": 682500,
+          "sizeBytes": 12456868,
+          "format": "Parquet (Snappy)"
+        }
+      ]
+    },
+    "expectedOutput": [
+      {
+        "column": "country_code",
+        "description": "Grade key"
+      },
+      {
+        "column": "entry_mode",
+        "description": "Grade key"
+      },
+      {
+        "column": "txn_count",
+        "description": "Priced transactions in the group (BIGINT)"
+      },
+      {
+        "column": "total_fee",
+        "description": "Sum of interchange_fee (DECIMAL)"
+      },
+      {
+        "column": "distinct_rate_versions_used",
+        "description": "Distinct rate_id applied in the group (BIGINT)"
+      }
+    ]
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "txnInputPath": "s3a://devlabs-data/datasets/payment-network/txns/100m-skew-key75/",
+    "rateInputPath": "s3a://devlabs-data/datasets/payment-network/dims/interchange_rate/",
+    "runTxnInputPath": "s3a://devlabs-data/challenges/l3-interchange-fee-settlement/run/txns/",
+    "runRateInputPath": "s3a://devlabs-data/challenges/l3-interchange-fee-settlement/run/rates/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l3-interchange-fee-settlement/expected/",
+    "gradeScript": "s3a://devlabs-data/challenges/l3-interchange-fee-settlement/grade/grade.py",
+    "outputFormat": "csv",
+    "gradeKeys": [
+      "country_code",
+      "entry_mode"
+    ],
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "512m",
+      "hardTimeoutSeconds": 150
+    },
+    "gradeChecks": [
+      "Spark job succeeds on the shared 100M drop",
+      "OUTPUT_PATH is a CSV directory with a header",
+      "grade/grade.py compares candidate CSV to the reference settlement summary"
+    ],
+    "sparkConf": {
+      "spark.sql.adaptive.enabled": "false",
+      "spark.task.maxFailures": "3",
+      "spark.yarn.maxAppAttempts": "1"
+    },
+    "scoring": {
+      "executionTime": {
+        "bands": [
+          { "maxSeconds": 90, "label": "Quick", "tone": "quick" },
+          { "maxSeconds": 120, "label": "Brisk", "tone": "brisk" },
+          { "maxSeconds": 180, "label": "Steady", "tone": "steady" },
+          { "label": "Slow", "tone": "slow" }
+        ]
+      }
+    },
+    "knobs": [
+      {
+        "id": "shufflePartitions",
+        "conf": "spark.sql.shuffle.partitions",
+        "label": "Shuffle partitions",
+        "help": "Partitions used for shuffle exchanges (joins and aggregations).",
+        "default": "32",
+        "options": [
+          {
+            "value": "8",
+            "label": "8"
+          },
+          {
+            "value": "16",
+            "label": "16"
+          },
+          {
+            "value": "32",
+            "label": "32"
+          },
+          {
+            "value": "64",
+            "label": "64"
+          },
+          {
+            "value": "128",
+            "label": "128"
+          },
+          {
+            "value": "200",
+            "label": "200"
+          }
+        ]
+      }
+    ]
+  }
+}

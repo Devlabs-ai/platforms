@@ -1,0 +1,121 @@
+{
+  "id": "l1-left-join-product-names",
+  "number": 7,
+  "title": "Left Join Product Names",
+  "contentSource": "minio",
+  "description": "The sales feed only has cryptic `product_id`s. Merchandising keeps a small product catalog with human-readable names. Some ids in sales are brand new and not in the catalog yet \u2014 those sales still need to show up, just without a name.\n\n**Left-join** sales (`INPUT_PATH`) to products (`PRODUCTS_PATH`) on `product_id` and add `product_name`. Keep every sales row; missing catalog matches \u2192 `product_name` is null. Write Parquet with overwrite.\n\nSales columns: `txn_id`, `product_id`, `store_id`, `quantity`. Products columns: `product_id` (unique), `product_name`. Output: all sales columns plus `product_name`. Use an explicit left join (`how=\"left\"`) \u2014 an inner join would drop unmatched sales. Implement with Spark DataFrame APIs \u2014 no driver-side nested loops over `collect`. **Run** uses two smoke testcases; **Submit** uses the full set and row-diffs your Parquet against each case\u2019s `expected/`.\n\nWrite results with `df.write.mode(\"overwrite\").parquet(OUTPUT_PATH)`. `OUTPUT_PATH` is set by the platform for **this Run/Submit only**.",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "joins",
+    "left-join",
+    "dataframe",
+    "parquet"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "overview": "Left-join sales to products on product_id; keep unmatched sales with null product_name; write Parquet to OUTPUT_PATH.",
+    "symptoms": [
+      "Dashboards show raw product_ids instead of catalog names.",
+      "New SKUs in sales are missing from the catalog \u2014 those rows must still appear."
+    ],
+    "yourTaskSteps": [
+      "Read sales from INPUT_PATH and products from PRODUCTS_PATH.",
+      "Left-join on product_id and add product_name (null when unmatched).",
+      "Write txn_id, product_id, store_id, quantity, product_name to OUTPUT_PATH with overwrite.",
+      "Submit is graded with a row-level compare against each selected testcase expected/."
+    ],
+    "yourTask": "Implement src/main.py that left-joins sales to the product catalog.",
+    "hints": [
+      "sales.join(products, on=\"product_id\", how=\"left\")",
+      "An inner join would quietly drop sales rows whose product_id is not in the catalog.",
+      "Product keys are unique \u2014 you should get one output row per sales row.",
+      "broadcast(products) is allowed but not required.",
+      "spark.read.parquet(INPUT_PATH) reads every staged sales testcase file."
+    ],
+    "inputSchema": [
+      {
+        "column": "txn_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "quantity",
+        "type": "INT"
+      }
+    ],
+    "expectedOutput": [
+      {
+        "column": "txn_id",
+        "description": "Sales line id (grade key)"
+      },
+      {
+        "column": "product_id",
+        "description": "From sales"
+      },
+      {
+        "column": "store_id",
+        "description": "From sales"
+      },
+      {
+        "column": "quantity",
+        "description": "From sales"
+      },
+      {
+        "column": "product_name",
+        "description": "From products via left join; null if unmatched"
+      }
+    ]
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "productsPath": "s3a://devlabs-data/challenges/l1-left-join-product-names/products/",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-left-join-product-names/testcases/",
+    "runCases": [
+      "01-smoke-basic",
+      "02-smoke-orphans"
+    ],
+    "submitCases": [
+      "03-full-mix",
+      "04-full-orphans",
+      "05-full-all-matched",
+      "06-full-sparse-catalog",
+      "07-full-balanced",
+      "08-full-stress"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-left-join-product-names/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-left-join-product-names/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "txn_id"
+    ],
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g"
+    },
+    "gradeChecks": [
+      "Spark job succeeds on selected Submit testcases",
+      "OUTPUT_PATH Parquet readable with sales columns plus product_name",
+      "Each Submit testcase expected/ matches candidate rows (key + values)",
+      "No extra rows beyond the union of selected expected testcases"
+    ]
+  }
+}

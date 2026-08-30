@@ -1,0 +1,36 @@
+{
+  "contentSource": "minio",
+  "businessDate": "2024-06-15",
+  "testcasesPrefix": "s3a://devlabs-data/challenges/l2-partitioned-daily-sales-write/testcases/",
+  "runCases": [
+    "01-smoke-basic",
+    "02-smoke-mixed-days"
+  ],
+  "submitCases": [
+    "03-full-mix",
+    "04-full-sparse-day",
+    "05-full-dense-day",
+    "06-full-balanced",
+    "07-full-stress"
+  ],
+  "inputPath": "s3a://devlabs-data/challenges/l2-partitioned-daily-sales-write/testcases/",
+  "evalSolutionPath": "s3a://devlabs-data/challenges/l2-partitioned-daily-sales-write/testcases/",
+  "outputFormat": "parquet",
+  "gradeKeys": [
+    "txn_id"
+  ],
+  "language": "python",
+  "starterFileName": "src/main.py",
+  "limits": {
+    "driver": 1,
+    "driverMemory": "1g",
+    "executors": 2,
+    "executorCores": 1,
+    "executorMemory": "1g"
+  },
+  "gradeChecks": [
+    "Spark job succeeds on selected Submit testcases",
+    "Only BUSINESS_DATE rows present; partitionBy business_date used",
+    "Each Submit testcase expected/ matches candidate rows"
+  ]
+}

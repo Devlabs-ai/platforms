@@ -1,0 +1,37 @@
+{
+  "contentSource": "minio",
+  "productsPath": "s3a://devlabs-data/challenges/l2-latest-product-revenue-rollup/products/",
+  "testcasesPrefix": "s3a://devlabs-data/challenges/l2-latest-product-revenue-rollup/testcases/",
+  "runCases": [
+    "01-smoke-basic",
+    "02-smoke-versions"
+  ],
+  "submitCases": [
+    "03-full-mix",
+    "04-full-many-versions",
+    "05-full-orphans",
+    "06-full-discounts",
+    "07-full-balanced",
+    "08-full-stress"
+  ],
+  "inputPath": "s3a://devlabs-data/challenges/l2-latest-product-revenue-rollup/testcases/",
+  "evalSolutionPath": "s3a://devlabs-data/challenges/l2-latest-product-revenue-rollup/testcases/",
+  "outputFormat": "parquet",
+  "gradeKeys": [
+    "category"
+  ],
+  "language": "python",
+  "starterFileName": "src/main.py",
+  "limits": {
+    "driver": 1,
+    "driverMemory": "1g",
+    "executors": 2,
+    "executorCores": 1,
+    "executorMemory": "1g"
+  },
+  "gradeChecks": [
+    "Spark job succeeds on selected Submit testcases",
+    "Latest product version used; category totals match expected/",
+    "Each Submit testcase expected/ matches candidate rows"
+  ]
+}

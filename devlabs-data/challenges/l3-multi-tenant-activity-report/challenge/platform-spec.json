@@ -1,0 +1,32 @@
+{
+  "contentSource": "minio",
+  "testcasesPrefix": "s3a://devlabs-data/challenges/l3-multi-tenant-activity-report/testcases/",
+  "runCases": [
+    "01-smoke-basic",
+    "02-smoke-skewed"
+  ],
+  "submitCases": [
+    "03-full-even-tenants",
+    "04-full-repeat-sessions",
+    "05-full-single-tenant",
+    "06-full-whale"
+  ],
+  "inputPath": "s3a://devlabs-data/challenges/l3-multi-tenant-activity-report/testcases/",
+  "evalSolutionPath": "s3a://devlabs-data/challenges/l3-multi-tenant-activity-report/testcases/",
+  "outputFormat": "parquet",
+  "gradeKeys": [
+    "tenant_id"
+  ],
+  "language": "python",
+  "starterFileName": "src/main.py",
+  "limits": {
+    "driver": 1,
+    "driverMemory": "1g",
+    "executors": 2,
+    "executorCores": 1,
+    "executorMemory": "512m"
+  },
+  "gradeChecks": [
+    "Once the Spark job succeeds, we evaluate your output against the expected results for every Submit testcase. Pass all cases to mark this lab Solved."
+  ]
+}

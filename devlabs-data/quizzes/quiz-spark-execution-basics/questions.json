@@ -1,0 +1,154 @@
+{
+  "id": "quiz-spark-execution-basics",
+  "title": "Spark Execution Basics",
+  "kind": "quiz",
+  "learningOutcome": "Trace Spark execution from SparkSession + config through lazy transforms to the action that creates Jobs, Stages, Tasks, and Executors",
+  "passScore": 0.8,
+  "questions": [
+    {
+      "id": "q1",
+      "section": "session",
+      "type": "mcq",
+      "prompt": "Look at the right-hand code. What does `SparkSession.builder…getOrCreate()` create?",
+      "choices": [
+        "Only a temporary local Python object with no cluster meaning",
+        "The Spark application entrypoint (driver) used to build jobs",
+        "One executor process per config line",
+        "A History Server page"
+      ],
+      "correctAnswer": "The Spark application entrypoint (driver) used to build jobs",
+      "explanation": "SparkSession is the driver-side entrypoint. Your main() runs on the driver; the session is how you submit work to the cluster.",
+      "requiresHistory": false
+    },
+    {
+      "id": "q2",
+      "section": "session",
+      "type": "mcq",
+      "prompt": "Where does `.appName(\"acme-filter-revenue-v1\")` show up after the job finishes?",
+      "choices": [
+        "Only in Python stack traces",
+        "As the application name in Spark History Server / UI",
+        "As a Parquet column in OUTPUT_PATH",
+        "It is ignored unless you also set spark.sql.shuffle.partitions"
+      ],
+      "correctAnswer": "As the application name in Spark History Server / UI",
+      "explanation": "appName labels the application in the Spark UI / History Server so you can find this run among others.",
+      "requiresHistory": false
+    },
+    {
+      "id": "q3",
+      "section": "config",
+      "type": "mcq",
+      "prompt": "What worker resources does this job ask the cluster for?",
+      "choices": [
+        "4 executors × 2 cores × 4g memory each",
+        "2 executors × 1 core × 1g memory each",
+        "1 executor × 4 cores × 1g memory",
+        "2 executors × 1 core × 512m memory each"
+      ],
+      "correctAnswer": "2 executors × 1 core × 1g memory each",
+      "explanation": "When the session is built, this app requests 2 executors with 1 core and 1g memory each (instances / cores / memory). That is the cluster footprint for running tasks.",
+      "requiresHistory": false
+    },
+    {
+      "id": "q4",
+      "section": "driver-executor",
+      "type": "mcq",
+      "prompt": "Who runs the `main()` function and builds the execution plan?",
+      "choices": [
+        "Every executor in parallel",
+        "The driver",
+        "History Server",
+        "Only the first Parquet partition"
+      ],
+      "correctAnswer": "The driver",
+      "explanation": "Application code runs on the driver. Executors run distributed tasks after an action.",
+      "requiresHistory": false
+    },
+    {
+      "id": "q5",
+      "section": "transforms",
+      "type": "mcq",
+      "prompt": "In the code, which of these is a transformation (lazy — does not start a Job by itself)?",
+      "choices": [
+        "enriched.write.mode(\"overwrite\").parquet(OUTPUT_PATH)",
+        "spark.stop()",
+        "valid = df.filter(...)",
+        "SparkSession.builder.getOrCreate()"
+      ],
+      "correctAnswer": "valid = df.filter(...)",
+      "explanation": "filter and withColumn are transformations that extend lineage without executing yet.",
+      "requiresHistory": false
+    },
+    {
+      "id": "q6",
+      "section": "transforms",
+      "type": "mcq",
+      "prompt": "After `filter` and `withColumn`, why hasn’t Spark finished writing the output yet?",
+      "choices": [
+        "Because OUTPUT_PATH is invalid until History Server opens",
+        "Because transformations are lazy — nothing runs until an action",
+        "Because executor.memory is too small",
+        "Because appName must be unique per write"
+      ],
+      "correctAnswer": "Because transformations are lazy — nothing runs until an action",
+      "explanation": "Spark records how to compute the result and waits for an action before scheduling work.",
+      "requiresHistory": false
+    },
+    {
+      "id": "q7",
+      "section": "actions",
+      "type": "mcq",
+      "prompt": "Which line in the exhibit is the action that triggers cluster execution?",
+      "choices": [
+        "df = spark.read.parquet(INPUT_PATH)",
+        "enriched = valid.withColumn(\"revenue\", revenue)",
+        "enriched.write.mode(\"overwrite\").parquet(OUTPUT_PATH)",
+        "spark.stop()"
+      ],
+      "correctAnswer": "enriched.write.mode(\"overwrite\").parquet(OUTPUT_PATH)",
+      "explanation": "Writing Parquet is an action — that launches Job(s).",
+      "requiresHistory": false
+    },
+    {
+      "id": "q8",
+      "section": "actions",
+      "type": "mcq",
+      "prompt": "If someone inserted `valid.count()` between the filter and the write, how many Jobs would you expect?",
+      "choices": [
+        "Still 1 Job",
+        "2 Jobs — count and write are both actions",
+        "0 Jobs — count is a transformation",
+        "One Job per executor"
+      ],
+      "correctAnswer": "2 Jobs — count and write are both actions",
+      "explanation": "Each action typically triggers its own Job.",
+      "requiresHistory": false
+    },
+    {
+      "id": "q9",
+      "section": "history",
+      "type": "number",
+      "prompt": "Open History Server for this app → Jobs. With only the write action (as in the code), how many Jobs should you see?",
+      "correctAnswer": 1,
+      "explanation": "One write action → one Job for this narrow pipeline.",
+      "requiresHistory": true,
+      "historyHint": "Jobs tab"
+    },
+    {
+      "id": "q10",
+      "section": "history",
+      "type": "mcq",
+      "prompt": "Match the hierarchy Spark uses after an action runs:",
+      "choices": [
+        "Task → contains Stages → each Stage is a Job",
+        "Job → Stages → Tasks (tasks run on executors)",
+        "Executor → creates Jobs → each Job is one Python line",
+        "appName → creates one Task per config key"
+      ],
+      "correctAnswer": "Job → Stages → Tasks (tasks run on executors)",
+      "explanation": "Action → Job → Stages → Tasks on executors.",
+      "requiresHistory": false
+    }
+  ]
+}

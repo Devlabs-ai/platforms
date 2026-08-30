@@ -1,0 +1,6 @@
+[
+  "Window.partitionBy(\"txn_id\").orderBy(col(\"event_ts\").desc(), col(\"store_id\").asc())",
+  "filter(col(\"rn\") == 1).drop(\"rn\")",
+  "dropDuplicates([\"txn_id\"]) does not guarantee latest \u2014 do not rely on it alone.",
+  "spark.read.parquet(INPUT_PATH) reads staged testcase files."
+]

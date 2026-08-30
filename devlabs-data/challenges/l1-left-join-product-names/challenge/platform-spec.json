@@ -1,0 +1,38 @@
+{
+  "contentSource": "minio",
+  "productsPath": "s3a://devlabs-data/challenges/l1-left-join-product-names/products/",
+  "testcasesPrefix": "s3a://devlabs-data/challenges/l1-left-join-product-names/testcases/",
+  "runCases": [
+    "01-smoke-basic",
+    "02-smoke-orphans"
+  ],
+  "submitCases": [
+    "03-full-mix",
+    "04-full-orphans",
+    "05-full-all-matched",
+    "06-full-sparse-catalog",
+    "07-full-balanced",
+    "08-full-stress"
+  ],
+  "inputPath": "s3a://devlabs-data/challenges/l1-left-join-product-names/testcases/",
+  "evalSolutionPath": "s3a://devlabs-data/challenges/l1-left-join-product-names/testcases/",
+  "outputFormat": "parquet",
+  "gradeKeys": [
+    "txn_id"
+  ],
+  "language": "python",
+  "starterFileName": "src/main.py",
+  "limits": {
+    "driver": 1,
+    "driverMemory": "1g",
+    "executors": 2,
+    "executorCores": 1,
+    "executorMemory": "1g"
+  },
+  "gradeChecks": [
+    "Spark job succeeds on selected Submit testcases",
+    "OUTPUT_PATH Parquet readable with sales columns plus product_name",
+    "Each Submit testcase expected/ matches candidate rows (key + values)",
+    "No extra rows beyond the union of selected expected testcases"
+  ]
+}

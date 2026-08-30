@@ -1,0 +1,38 @@
+{
+  "contentSource": "minio",
+  "testcasesPrefix": "s3a://devlabs-data/challenges/l1-top-products-by-revenue/testcases/",
+  "runCases": [
+    "01-smoke-basic",
+    "02-smoke-edges"
+  ],
+  "submitCases": [
+    "03-full-mix",
+    "04-full-ties",
+    "05-full-few-products",
+    "06-full-zero-discount",
+    "07-full-high-discount",
+    "08-full-balanced",
+    "09-full-stress"
+  ],
+  "inputPath": "s3a://devlabs-data/challenges/l1-top-products-by-revenue/testcases/",
+  "evalSolutionPath": "s3a://devlabs-data/challenges/l1-top-products-by-revenue/testcases/",
+  "outputFormat": "parquet",
+  "gradeKeys": [
+    "product_id"
+  ],
+  "language": "python",
+  "starterFileName": "src/main.py",
+  "limits": {
+    "driver": 1,
+    "driverMemory": "1g",
+    "executors": 2,
+    "executorCores": 1,
+    "executorMemory": "1g"
+  },
+  "gradeChecks": [
+    "Spark job succeeds on selected Submit testcases",
+    "OUTPUT_PATH Parquet readable with product_id, total_revenue, rank",
+    "Each Submit testcase expected/ matches candidate rows (key + values)",
+    "No extra rows beyond the union of selected expected testcases"
+  ]
+}

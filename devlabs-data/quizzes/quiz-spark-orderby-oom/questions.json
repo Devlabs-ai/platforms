@@ -1,0 +1,85 @@
+{
+  "id": "quiz-spark-orderby-oom",
+  "title": "OrderBy Shuffle & Executor OOM",
+  "kind": "quiz",
+  "learningOutcome": "Postmortem a failed nightly sorted export: explain why orderBy + coalesce(1) + collect_list under 512m executor memory OOMs",
+  "passScore": 0.8,
+  "questions": [
+    {
+      "id": "q1",
+      "section": "execution",
+      "type": "mcq",
+      "prompt": "On a 10k-row sample this job finishes. On the full drop it dies under the same 512m executors. What does that pattern tell you about where the plan’s cost actually lives?",
+      "choices": [
+        "The code path must be different at full scale — Spark silently rewrites orderBy into collect() only when the input is large",
+        "Correctness is fine either way; failure means MinIO rejected a large write, not that executor work grew with the input",
+        "The expensive work is proportional to how much data must be shuffled, sorted, gathered into one partition, and held in an in-heap structure — a sample never stresses the same per-task working set as the full drop on a tiny heap",
+        "Full-scale runs always use the driver for sorting; samples stay on executors, so only production hits driver OOM"
+      ],
+      "correctAnswer": "The expensive work is proportional to how much data must be shuffled, sorted, gathered into one partition, and held in an in-heap structure — a sample never stresses the same per-task working set as the full drop on a tiny heap",
+      "explanation": "orderBy + coalesce(1) + collect_list do more memory-heavy executor work as the input grows. A sample can hide a plan that cannot fit the real working set in 512m.",
+      "requiresHistory": false
+    },
+    {
+      "id": "q2",
+      "section": "execution",
+      "type": "mcq",
+      "prompt": "Trace the exhibit: orderBy → coalesce(1) → agg(collect_list(struct(...))) → collect. A coworker says “just bump driver memory — sorts always happen on the driver.” Why is that the wrong mental model for this failure?",
+      "choices": [
+        "They are right for DataFrame orderBy; only RDD sort runs on executors",
+        "Driver memory only affects UI; Spark never uses the driver heap for anything in a write job",
+        "The shuffle/sort, the single-partition gather, and the collect_list buffer all run as executor work — the 512m worker heap is what has to hold that array, not the driver’s 1g",
+        "coalesce(1) moves the entire dataset to History Server, so neither driver nor executor memory matters"
+      ],
+      "correctAnswer": "The shuffle/sort, the single-partition gather, and the collect_list buffer all run as executor work — the 512m worker heap is what has to hold that array, not the driver’s 1g",
+      "explanation": "collect_list here builds an unbounded array inside an executor task. Raising driver memory does not enlarge the worker that is dying with Java heap space.",
+      "requiresHistory": false
+    },
+    {
+      "id": "q3",
+      "section": "plan",
+      "type": "mcq",
+      "prompt": "A streaming orderBy write can often spill sort buffers to disk and survive. Why does this exhibit’s coalesce(1) + collect_list path remove that escape hatch on a 512m executor?",
+      "choices": [
+        "coalesce(1) disables Tungsten and forces every row through Python on the driver",
+        "coalesce(1) puts the whole ordered stream in one task, and collect_list must retain every element in that task’s JVM heap — there is no spill path for an unbounded aggregation buffer",
+        "collect_list only runs on the driver; coalesce is irrelevant",
+        "orderBy already cached the data on disk, so collect_list is free"
+      ],
+      "correctAnswer": "coalesce(1) puts the whole ordered stream in one task, and collect_list must retain every element in that task’s JVM heap — there is no spill path for an unbounded aggregation buffer",
+      "explanation": "External sort can spill; collect_list cannot. One task holding every sorted row as an array is a hard heap cliff.",
+      "requiresHistory": false
+    },
+    {
+      "id": "q4",
+      "section": "history",
+      "type": "mcq",
+      "prompt": "Open the frozen History Server app for this exhibit. Which reading of the failure actually matches how this plan runs?",
+      "choices": [
+        "Application SUCCEEDED but OUTPUT_PATH is empty — grading failed, not Spark",
+        "A failed stage/task while building the single-partition collect_list, with ExecutorLostFailure / Java heap space (or container OOMKilled) — a worker died under memory pressure",
+        "Only the driver shows OutOfMemoryError while every executor stage is green — classic broadcast build failure",
+        "No jobs appear because orderBy is lazy and write never scheduled"
+      ],
+      "correctAnswer": "A failed stage/task while building the single-partition collect_list, with ExecutorLostFailure / Java heap space (or container OOMKilled) — a worker died under memory pressure",
+      "explanation": "Local Docker rehearsal showed repeated `OutOfMemoryError: Java heap space` on the collect_list stage, then lost executors. History should tell that same story.",
+      "requiresHistory": true,
+      "historyHint": "Application status → failed stage/task error details"
+    },
+    {
+      "id": "q5",
+      "section": "remediation",
+      "type": "mcq",
+      "prompt": "On-call proposes four fixes. Which one actually confronts the root cause of this incident?",
+      "choices": [
+        "Rename appName and rerun — History Server was caching the old OOM",
+        "Keep coalesce(1) + collect_list and only raise spark.driver.memory so the “sort node” has room",
+        "Change the contract or the plan: drop the single-file funnel and the unbounded in-heap collect_list, avoid a global sort unless the loader truly needs total order, and/or size executor memory for the real per-task working set",
+        "Replace collect_list with collect_set — sets always spill automatically under 512m"
+      ],
+      "correctAnswer": "Change the contract or the plan: drop the single-file funnel and the unbounded in-heap collect_list, avoid a global sort unless the loader truly needs total order, and/or size executor memory for the real per-task working set",
+      "explanation": "Root cause is plan + resources: global order + one partition + unbounded aggregation buffer on a 512m trail. Driver-only memory or renaming the app does not remove that cliff.",
+      "requiresHistory": false
+    }
+  ]
+}

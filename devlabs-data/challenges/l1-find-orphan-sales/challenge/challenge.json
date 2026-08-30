@@ -1,0 +1,116 @@
+{
+  "id": "l1-find-orphan-sales",
+  "number": 9,
+  "title": "Find Orphan Sales",
+  "contentSource": "minio",
+  "description": "Some overnight `product_id`s are not in the merchandising catalog yet. Ops wants **only those orphan sales** \u2014 not the matched ones.\n\n**Left-anti-join** sales (`INPUT_PATH`) against products (`PRODUCTS_PATH`) on `product_id`. Keep sales rows with no catalog match. Do not emit product columns. Write Parquet with overwrite.\n\nSales columns: `txn_id`, `product_id`, `store_id`, `quantity`. Products columns: `product_id` (unique), `product_name` (unused in output). Output: the four sales columns only. Use an explicit left anti join (`how=\"left_anti\"` or `\"anti\"`) \u2014 a left join would keep matches with null names; an inner join would keep only matches. Implement with Spark DataFrame APIs \u2014 no driver-side nested loops over `collect`. **Run** uses two smoke testcases; **Submit** uses the full set and row-diffs your Parquet against each case\u2019s `expected/`.\n\nWrite results with `df.write.mode(\"overwrite\").parquet(OUTPUT_PATH)`. `OUTPUT_PATH` is set by the platform for **this Run/Submit only**.",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "joins",
+    "left-anti",
+    "dataframe",
+    "parquet"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "overview": "Left-anti-join sales to products on product_id; keep only unmatched sales; write Parquet to OUTPUT_PATH.",
+    "symptoms": [
+      "Ops cannot isolate new SKUs that never hit the catalog.",
+      "A left join keeps matched rows too; an inner join keeps only matches \u2014 neither is the orphan list."
+    ],
+    "yourTaskSteps": [
+      "Read sales from INPUT_PATH and products from PRODUCTS_PATH.",
+      "Left-anti-join on product_id so only unmatched sales remain.",
+      "Write txn_id, product_id, store_id, quantity (no product columns) to OUTPUT_PATH with overwrite.",
+      "Submit is graded with a row-level compare against each selected testcase expected/."
+    ],
+    "yourTask": "Implement src/main.py that finds orphan sales via left_anti.",
+    "hints": [
+      "sales.join(products, on=\"product_id\", how=\"left_anti\")",
+      "left_anti keeps left rows with no match and does not add right-side columns.",
+      "left_semi is the opposite filter (exists); left keeps all sales with nullable names.",
+      "Read products from os.environ[\"PRODUCTS_PATH\"]."
+    ],
+    "inputSchema": [
+      {
+        "column": "txn_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "quantity",
+        "type": "INT"
+      }
+    ],
+    "expectedOutput": [
+      {
+        "column": "txn_id",
+        "description": "Orphan sales line id (grade key)"
+      },
+      {
+        "column": "product_id",
+        "description": "Not present in products"
+      },
+      {
+        "column": "store_id",
+        "description": "From sales"
+      },
+      {
+        "column": "quantity",
+        "description": "From sales"
+      }
+    ]
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "productsPath": "s3a://devlabs-data/challenges/l1-find-orphan-sales/products/",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-find-orphan-sales/testcases/",
+    "runCases": [
+      "01-smoke-basic",
+      "02-smoke-orphans"
+    ],
+    "submitCases": [
+      "03-full-mix",
+      "04-full-orphans",
+      "05-full-all-matched",
+      "06-full-sparse-catalog",
+      "07-full-balanced",
+      "08-full-stress"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-find-orphan-sales/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-find-orphan-sales/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "txn_id"
+    ],
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g"
+    },
+    "gradeChecks": [
+      "Spark job succeeds on selected Submit testcases",
+      "OUTPUT_PATH Parquet readable with sales columns only (no product_name)",
+      "Each Submit testcase expected/ matches candidate rows (key + values)",
+      "No extra rows beyond the union of selected expected testcases"
+    ]
+  }
+}

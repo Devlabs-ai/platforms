@@ -1,0 +1,74 @@
+{
+  "id": "l3-multi-tenant-activity-report",
+  "number": 16,
+  "title": "Multi-Tenant Activity Report",
+  "contentSource": "minio",
+  "description": "Halcyon Analytics hosts product analytics for hundreds of customer workspaces. Every night the collectors flush one Parquet drop containing raw events for every workspace, and a morning job turns that drop into the activity report each customer sees on their dashboard.\n\nRead the event feed from `INPUT_PATH` and write one row per `tenant_id` as Parquet to `OUTPUT_PATH`:\n\n- `event_count` — how many events the tenant produced\n- `distinct_users` — number of distinct `user_id` values\n- `distinct_sessions` — number of distinct `session_id` values\n- `total_amount` — sum of `amount`, as `DECIMAL(14,2)`\n\nThe feed has seven columns: `event_id`, `tenant_id`, `event_date`, `user_id`, `session_id`, `action`, and `amount`. Only the four figures above belong in the report.\n\nTraffic is nowhere near evenly spread. Halcyon's busiest workspace produces more events than every other workspace combined, and a workspace is a single group — one key, handled by one task. The executor you are given is deliberately small: one core and 512 MB of heap, the same slot this job gets in the nightly schedule.\n\n**Note: the busiest workspace does not fit in the executor heap. Any approach that first gathers one tenant's ids into a single collection will fall over at full scale.**",
+  "difficulty": "L2",
+  "tags": [
+    "spark",
+    "l2",
+    "aggregation",
+    "memory",
+    "skew",
+    "oom",
+    "tuning"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "hints": [],
+    "inputSchema": [
+      { "column": "event_id", "type": "BIGINT" },
+      { "column": "tenant_id", "type": "STRING" },
+      { "column": "event_date", "type": "DATE" },
+      { "column": "user_id", "type": "BIGINT" },
+      { "column": "session_id", "type": "STRING" },
+      { "column": "action", "type": "STRING" },
+      { "column": "amount", "type": "DECIMAL(10,2)" }
+    ],
+    "expectedOutput": [
+      { "column": "tenant_id", "description": "Grade key" },
+      { "column": "event_count", "description": "Events for the tenant (BIGINT)" },
+      { "column": "distinct_users", "description": "Distinct user_id values (BIGINT)" },
+      { "column": "distinct_sessions", "description": "Distinct session_id values (BIGINT)" },
+      { "column": "total_amount", "description": "Sum of amount (DECIMAL(14,2))" }
+    ]
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l3-multi-tenant-activity-report/testcases/",
+    "runCases": [
+      "01-smoke-basic",
+      "02-smoke-skewed"
+    ],
+    "submitCases": [
+      "03-full-even-tenants",
+      "04-full-repeat-sessions",
+      "05-full-single-tenant",
+      "06-full-whale"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l3-multi-tenant-activity-report/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l3-multi-tenant-activity-report/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "tenant_id"
+    ],
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "512m"
+    },
+    "gradeChecks": [
+      "Once the Spark job succeeds, we evaluate your output against the expected results for every Submit testcase. Pass all cases to mark this lab Solved."
+    ]
+  }
+}

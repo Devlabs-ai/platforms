@@ -1,0 +1,13 @@
+{
+  "submissionId": "frozen-acme-sorted-export-oom-v1",
+  "appName": "acme-sorted-export-oom-v1",
+  "historyAppId": "spark-93fa391ff9c14e1e9141da757717f8d0",
+  "historyUrl": "http://192.168.1.9:30080/history/spark-93fa391ff9c14e1e9141da757717f8d0",
+  "expectFailure": true,
+  "finalStatus": "failed",
+  "run": {
+    "inputPath": "s3a://devlabs-data/quizzes/quiz-spark-orderby-oom/fixture-input/"
+  },
+  "capturedAt": "2026-08-10T17:00:55.113206Z",
+  "k8sName": "quiz-50de8cdc"
+}

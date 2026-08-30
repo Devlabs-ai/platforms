@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -30,7 +32,26 @@ MINIO_SECRET_KEY = os.environ.get("SPARK_MINIO_SECRET_KEY", "spark-s3-change-me"
 
 JOB_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 
-app = FastAPI(title="Spark Platform", version="1.1.0")
+HARD_TIMEOUT_ANN = "spark-platform.devlabs/hard-timeout-seconds"
+KILLED_ANN = "spark-platform.devlabs/killed-reason"
+RUNNING_SINCE_ANN = "spark-platform.devlabs/running-since"
+MANAGED_LABEL = "spark-platform.devlabs/managed-by"
+KILL_MESSAGE = "Hard threshold has reached so killing this Job"
+TERMINAL_STATES = {"COMPLETED", "FAILED", "SUBMISSION_FAILED"}
+DEFAULT_HARD_TIMEOUT_SECONDS = int(os.environ.get("SPARK_JOB_HARD_TIMEOUT_SECONDS", "600"))
+WATCH_INTERVAL_SECONDS = float(os.environ.get("SPARK_JOB_WATCH_INTERVAL_SECONDS", "5"))
+WATCHER_CM = "spark-platform-watcher"
+WATCHER_CM_KEY = "enabled"
+
+logger = logging.getLogger("uvicorn.error")
+
+# Survives CR delete so GET /api/jobs/{name} still returns the kill reason
+# to the backend poller.
+_killed_jobs: dict[str, dict[str, Any]] = {}
+_watcher_enabled = True
+_stamped_running: set[str] = set()
+
+app = FastAPI(title="Spark Platform", version="1.2.0")
 
 try:
     config.load_incluster_config()
@@ -77,6 +98,12 @@ class JobSubmitRequest(BaseModel):
     executor_memory: str = "512m"
     driver_cores: int = Field(default=1, ge=1, le=2)
     executor_cores: int = Field(default=1, ge=1, le=2)
+    hard_timeout_seconds: int | None = Field(
+        default=None,
+        ge=30,
+        le=7200,
+        description="Wall-clock seconds from Spark driver start; CR creation if the driver never starts",
+    )
 
     @model_validator(mode="after")
     def _validate_payload(self) -> JobSubmitRequest:
@@ -94,8 +121,134 @@ class JobSubmitRequest(BaseModel):
         return self
 
 
+class WatcherUpdate(BaseModel):
+    enabled: bool
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_bool(raw: str | None, default: bool = True) -> bool:
+    if raw is None:
+        return default
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _watcher_status() -> dict[str, Any]:
+    return {
+        "enabled": _watcher_enabled,
+        "intervalSeconds": WATCH_INTERVAL_SECONDS,
+        "defaultHardTimeoutSeconds": DEFAULT_HARD_TIMEOUT_SECONDS,
+    }
+
+
+def _load_watcher_enabled() -> bool:
+    global _watcher_enabled
+    env_default = _parse_bool(os.environ.get("SPARK_JOB_WATCHER_ENABLED"), True)
+    try:
+        cm = core_api.read_namespaced_config_map(WATCHER_CM, NAMESPACE)
+        _watcher_enabled = _parse_bool((cm.data or {}).get(WATCHER_CM_KEY), env_default)
+    except ApiException as exc:
+        if exc.status != 404:
+            logger.warning("could not read watcher configmap: %s", exc)
+        _watcher_enabled = env_default
+    return _watcher_enabled
+
+
+def _persist_watcher_enabled(enabled: bool) -> None:
+    data = {WATCHER_CM_KEY: "true" if enabled else "false"}
+    meta = client.V1ObjectMeta(
+        name=WATCHER_CM,
+        namespace=NAMESPACE,
+        labels={MANAGED_LABEL: "spark-platform-api"},
+    )
+    body = client.V1ConfigMap(metadata=meta, data=data)
+    try:
+        core_api.replace_namespaced_config_map(WATCHER_CM, NAMESPACE, body)
+    except ApiException as exc:
+        if exc.status == 404:
+            try:
+                core_api.create_namespaced_config_map(NAMESPACE, body)
+            except ApiException as create_exc:
+                logger.warning("could not create watcher configmap: %s", create_exc)
+        else:
+            logger.warning("could not persist watcher configmap: %s", exc)
+
+
+def _resolve_hard_timeout(raw: int | None) -> int:
+    if raw is None:
+        return DEFAULT_HARD_TIMEOUT_SECONDS
+    return max(30, min(7200, int(raw)))
+
+
+def _parse_k8s_time(raw: str | datetime | None) -> datetime | None:
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        dt = raw
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    text = str(raw).strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _hard_timeout_from_obj(obj: dict[str, Any]) -> int:
+    anns = (obj.get("metadata") or {}).get("annotations") or {}
+    raw = anns.get(HARD_TIMEOUT_ANN)
+    try:
+        return _resolve_hard_timeout(int(raw) if raw is not None else None)
+    except (TypeError, ValueError):
+        return DEFAULT_HARD_TIMEOUT_SECONDS
+
+
+def _killed_stub(name: str, obj: dict[str, Any] | None = None) -> dict[str, Any]:
+    base = _job_summary(obj) if obj else {
+        "name": name,
+        "user": "unknown",
+        "type": None,
+        "attempts": 0,
+        "start": None,
+        "mainClass": None,
+        "mainApplicationFile": None,
+        "createdAt": None,
+        "applicationId": None,
+        "links": {
+            "logs": f"/api/jobs/{name}/logs",
+            "status": f"/api/jobs/{name}",
+            "history": HISTORY_UI_URL.rstrip("/"),
+            "historyApp": None,
+        },
+    }
+    base["status"] = "FAILED"
+    base["rawStatus"] = "FAILED"
+    base["error"] = KILL_MESSAGE
+    base["finish"] = _now_iso()
+    base["killedByWatcher"] = True
+    return base
+
+
+def _job_metadata(body: JobSubmitRequest, job_type: str) -> dict[str, Any]:
+    timeout = _resolve_hard_timeout(body.hard_timeout_seconds)
+    return {
+        "name": body.name.lower(),
+        "namespace": NAMESPACE,
+        "labels": {
+            "spark-platform.devlabs/user": body.user[:63],
+            MANAGED_LABEL: "spark-platform-api",
+            "spark-platform.devlabs/type": job_type,
+        },
+        "annotations": {
+            HARD_TIMEOUT_ANN: str(timeout),
+        },
+    }
 
 
 def _normalize_status(state: str | None) -> str:
@@ -125,24 +278,31 @@ def _job_summary(obj: dict[str, Any]) -> dict[str, Any]:
     state = app_state.get("state")
     name = meta.get("name", "")
     labels = meta.get("labels", {}) or {}
+    annotations = meta.get("annotations", {}) or {}
     spark_app_id = status.get("sparkApplicationId") or None
     history_base = HISTORY_UI_URL.rstrip("/")
     history_app = f"{history_base}/history/{spark_app_id}" if spark_app_id else None
+    killed = annotations.get(KILLED_ANN)
+    error = killed or app_state.get("errorMessage")
+    normalized = "FAILED" if killed else _normalize_status(state)
 
     return {
         "name": name,
         "user": labels.get("spark-platform.devlabs/user", "unknown"),
-        "status": _normalize_status(state),
-        "rawStatus": state,
+        "status": normalized,
+        "rawStatus": "FAILED" if killed else state,
         "type": spec.get("type"),
         "attempts": status.get("executionAttempts", 0),
         "start": status.get("lastSubmissionAttemptTime"),
         "finish": status.get("terminationTime"),
-        "error": app_state.get("errorMessage"),
+        "error": error,
         "mainClass": spec.get("mainClass"),
         "mainApplicationFile": spec.get("mainApplicationFile"),
         "createdAt": meta.get("creationTimestamp"),
+        "runningSince": annotations.get(RUNNING_SINCE_ANN),
         "applicationId": spark_app_id,
+        "hardTimeoutSeconds": _hard_timeout_from_obj(obj),
+        "killedByWatcher": bool(killed),
         "links": {
             "logs": f"/api/jobs/{name}/logs",
             "status": f"/api/jobs/{name}",
@@ -208,15 +368,7 @@ def _build_spark_application(body: JobSubmitRequest) -> dict[str, Any]:
         return {
             "apiVersion": "sparkoperator.k8s.io/v1beta2",
             "kind": "SparkApplication",
-            "metadata": {
-                "name": name,
-                "namespace": NAMESPACE,
-                "labels": {
-                    "spark-platform.devlabs/user": body.user[:63],
-                    "spark-platform.devlabs/managed-by": "spark-platform-api",
-                    "spark-platform.devlabs/type": "Python",
-                },
-            },
+            "metadata": _job_metadata(body, "Python"),
             "spec": {
                 "type": "Python",
                 "pythonVersion": body.python_version,
@@ -253,15 +405,7 @@ def _build_spark_application(body: JobSubmitRequest) -> dict[str, Any]:
     return {
         "apiVersion": "sparkoperator.k8s.io/v1beta2",
         "kind": "SparkApplication",
-        "metadata": {
-            "name": name,
-            "namespace": NAMESPACE,
-            "labels": {
-                "spark-platform.devlabs/user": body.user[:63],
-                "spark-platform.devlabs/managed-by": "spark-platform-api",
-                "spark-platform.devlabs/type": "Scala",
-            },
-        },
+        "metadata": _job_metadata(body, "Scala"),
         "spec": {
             "type": "Scala",
             "mode": "cluster",
@@ -322,7 +466,23 @@ def platform_config() -> dict[str, str]:
         "historyUiUrl": HISTORY_UI_URL,
         "sparkImage": SPARK_IMAGE,
         "supportsPython": "true",
+        "hardTimeoutSeconds": str(DEFAULT_HARD_TIMEOUT_SECONDS),
+        "jobWatcherEnabled": "true" if _watcher_enabled else "false",
     }
+
+
+@app.get("/api/watcher")
+def get_watcher() -> dict[str, Any]:
+    return _watcher_status()
+
+
+@app.put("/api/watcher")
+def put_watcher(body: WatcherUpdate) -> dict[str, Any]:
+    global _watcher_enabled
+    _watcher_enabled = bool(body.enabled)
+    _persist_watcher_enabled(_watcher_enabled)
+    logger.info("job watcher %s", "enabled" if _watcher_enabled else "disabled")
+    return _watcher_status()
 
 
 @app.get("/api/jobs")
@@ -335,6 +495,10 @@ def list_jobs(user: str | None = Query(default=None)) -> dict[str, Any]:
     )
     items = resp.get("items", [])
     jobs = [_job_summary(item) for item in items]
+    seen = {j["name"] for j in jobs}
+    for name, stub in _killed_jobs.items():
+        if name not in seen:
+            jobs.append(stub)
     if user:
         jobs = [j for j in jobs if j["user"] == user]
     jobs.sort(key=lambda j: j.get("createdAt") or "", reverse=True)
@@ -353,10 +517,18 @@ def get_job(name: str) -> dict[str, Any]:
         )
     except ApiException as exc:
         if exc.status == 404:
+            cached = _killed_jobs.get(name)
+            if cached:
+                return cached
             raise HTTPException(status_code=404, detail="job not found") from exc
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     summary = _job_summary(obj)
+    if name in _killed_jobs:
+        summary["status"] = "FAILED"
+        summary["rawStatus"] = "FAILED"
+        summary["error"] = KILL_MESSAGE
+        summary["killedByWatcher"] = True
     summary["driverPod"] = _find_driver_pod(name)
     return summary
 
@@ -404,9 +576,12 @@ def delete_job(name: str) -> Response:
 
 @app.get("/api/jobs/{name}/logs")
 def job_logs(name: str, tail: int = Query(default=200, ge=1, le=5000)) -> PlainTextResponse:
-    get_job(name)
+    summary = get_job(name)
+    killed = bool(summary.get("killedByWatcher") or (summary.get("error") or "").startswith("Hard threshold"))
     pod = _find_driver_pod(name)
     if not pod:
+        if killed:
+            return PlainTextResponse(f"{KILL_MESSAGE}\n")
         return PlainTextResponse("Driver pod not found yet. Job may still be submitting.\n", status_code=202)
 
     try:
@@ -416,11 +591,175 @@ def job_logs(name: str, tail: int = Query(default=200, ge=1, le=5000)) -> PlainT
             tail_lines=tail,
         )
     except ApiException as exc:
+        if killed:
+            return PlainTextResponse(f"{KILL_MESSAGE}\n")
         if exc.status == 400 and "waiting to start" in str(exc.body).lower():
             return PlainTextResponse("Driver pod is starting; logs not available yet.\n", status_code=202)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return PlainTextResponse(log or "(empty log)\n")
+    text = log or "(empty log)\n"
+    if killed and KILL_MESSAGE not in text:
+        text = text.rstrip() + f"\n{KILL_MESSAGE}\n"
+    return PlainTextResponse(text)
+
+
+def _driver_start_times() -> dict[str, datetime]:
+    out: dict[str, datetime] = {}
+    try:
+        pods = core_api.list_namespaced_pod(
+            namespace=NAMESPACE,
+            label_selector="spark-role=driver",
+        )
+    except ApiException as exc:
+        logger.warning("job watcher pod list failed: %s", exc)
+        return out
+    for pod in pods.items or []:
+        labels = (pod.metadata.labels or {}) if pod.metadata else {}
+        app = labels.get("sparkoperator.k8s.io/app-name")
+        if not app:
+            name = (pod.metadata.name or "") if pod.metadata else ""
+            if name.endswith("-driver"):
+                app = name[: -len("-driver")]
+            else:
+                continue
+        started = _parse_k8s_time(getattr(pod.status, "start_time", None) if pod.status else None)
+        if started:
+            out[app] = started
+    return out
+
+
+def _mark_running_since(name: str, when: datetime) -> None:
+    iso = when.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        custom_api.patch_namespaced_custom_object(
+            group="sparkoperator.k8s.io",
+            version="v1beta2",
+            namespace=NAMESPACE,
+            plural="sparkapplications",
+            name=name,
+            body={"metadata": {"annotations": {RUNNING_SINCE_ANN: iso}}},
+        )
+    except ApiException as exc:
+        logger.warning("could not stamp running-since on %s: %s", name, exc)
+
+
+def _spark_clock_start(obj: dict[str, Any], driver_starts: dict[str, datetime]) -> datetime | None:
+    """Hard-timeout clock: driver start once Spark is up, else CR creation (stuck submit)."""
+    meta = obj.get("metadata") or {}
+    name = meta.get("name") or ""
+    anns = meta.get("annotations") or {}
+    created = _parse_k8s_time(meta.get("creationTimestamp"))
+    status = obj.get("status") or {}
+    app_id = status.get("sparkApplicationId")
+    state = ((status.get("applicationState") or {}).get("state") or "")
+    annotated = _parse_k8s_time(anns.get(RUNNING_SINCE_ANN))
+    driver_start = driver_starts.get(name)
+
+    spark_up = bool(app_id) or state in {"RUNNING", "SUCCEEDING", "FAILING"}
+    started = annotated or driver_start
+    if started is None and spark_up:
+        started = datetime.now(timezone.utc)
+    if started is not None:
+        if annotated is None and name and name not in _stamped_running:
+            _mark_running_since(name, started)
+            _stamped_running.add(name)
+        return started
+    return created
+
+
+def _kill_overdue_job(obj: dict[str, Any]) -> None:
+    name = (obj.get("metadata") or {}).get("name")
+    if not name:
+        return
+    timeout = _hard_timeout_from_obj(obj)
+    stub = _killed_stub(name, obj)
+    stub["hardTimeoutSeconds"] = timeout
+    _killed_jobs[name] = stub
+    logger.warning("killing SparkApplication %s: %s (timeout=%ss)", name, KILL_MESSAGE, timeout)
+    try:
+        custom_api.patch_namespaced_custom_object(
+            group="sparkoperator.k8s.io",
+            version="v1beta2",
+            namespace=NAMESPACE,
+            plural="sparkapplications",
+            name=name,
+            body={"metadata": {"annotations": {KILLED_ANN: KILL_MESSAGE}}},
+        )
+    except ApiException as exc:
+        logger.warning("could not annotate %s before kill: %s", name, exc)
+    try:
+        custom_api.delete_namespaced_custom_object(
+            group="sparkoperator.k8s.io",
+            version="v1beta2",
+            namespace=NAMESPACE,
+            plural="sparkapplications",
+            name=name,
+        )
+    except ApiException as exc:
+        if exc.status != 404:
+            logger.warning("could not delete SparkApplication %s: %s", name, exc)
+
+
+def _reap_overdue_jobs() -> None:
+    if not _watcher_enabled:
+        return
+    try:
+        resp = custom_api.list_namespaced_custom_object(
+            group="sparkoperator.k8s.io",
+            version="v1beta2",
+            namespace=NAMESPACE,
+            plural="sparkapplications",
+        )
+    except ApiException as exc:
+        logger.warning("job watcher list failed: %s", exc)
+        return
+
+    now = datetime.now(timezone.utc)
+    driver_starts = _driver_start_times()
+    for obj in resp.get("items") or []:
+        meta = obj.get("metadata") or {}
+        labels = meta.get("labels") or {}
+        if labels.get(MANAGED_LABEL) != "spark-platform-api":
+            continue
+        name = meta.get("name")
+        if not name or name in _killed_jobs:
+            continue
+        status = (obj.get("status") or {}).get("applicationState") or {}
+        state = status.get("state") or ""
+        if state in TERMINAL_STATES:
+            continue
+        anns = meta.get("annotations") or {}
+        if anns.get(KILLED_ANN):
+            _kill_overdue_job(obj)
+            continue
+        started = _spark_clock_start(obj, driver_starts)
+        if started is None:
+            continue
+        timeout = _hard_timeout_from_obj(obj)
+        elapsed = (now - started).total_seconds()
+        if elapsed >= timeout:
+            _kill_overdue_job(obj)
+
+
+async def _watch_loop() -> None:
+    _load_watcher_enabled()
+    logger.info(
+        "job watcher started (interval=%ss default_hard_timeout=%ss enabled=%s)",
+        WATCH_INTERVAL_SECONDS,
+        DEFAULT_HARD_TIMEOUT_SECONDS,
+        _watcher_enabled,
+    )
+    while True:
+        try:
+            await asyncio.to_thread(_reap_overdue_jobs)
+        except Exception:
+            logger.exception("job watcher iteration failed")
+        await asyncio.sleep(WATCH_INTERVAL_SECONDS)
+
+
+@app.on_event("startup")
+async def _start_job_watcher() -> None:
+    asyncio.create_task(_watch_loop())
 
 
 @app.get("/")

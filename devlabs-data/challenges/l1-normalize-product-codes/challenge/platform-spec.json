@@ -1,0 +1,38 @@
+{
+  "contentSource": "minio",
+  "testcasesPrefix": "s3a://devlabs-data/challenges/l1-normalize-product-codes/testcases/",
+  "runCases": [
+    "01-smoke-basic",
+    "02-smoke-edges"
+  ],
+  "submitCases": [
+    "03-full-mix",
+    "04-full-whitespace",
+    "05-full-case",
+    "06-full-separators",
+    "07-full-symbols",
+    "08-full-balanced",
+    "09-full-stress"
+  ],
+  "inputPath": "s3a://devlabs-data/challenges/l1-normalize-product-codes/testcases/",
+  "evalSolutionPath": "s3a://devlabs-data/challenges/l1-normalize-product-codes/testcases/",
+  "outputFormat": "parquet",
+  "gradeKeys": [
+    "product_id"
+  ],
+  "language": "python",
+  "starterFileName": "src/main.py",
+  "limits": {
+    "driver": 1,
+    "driverMemory": "1g",
+    "executors": 2,
+    "executorCores": 1,
+    "executorMemory": "1g"
+  },
+  "gradeChecks": [
+    "Spark job succeeds on selected Submit testcases",
+    "OUTPUT_PATH Parquet readable with product_id, product_code, product_name",
+    "Each Submit testcase expected/ matches candidate rows (key + values)",
+    "No extra rows beyond the union of selected expected testcases"
+  ]
+}

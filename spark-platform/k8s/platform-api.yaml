@@ -37,6 +37,12 @@ spec:
               value: "3.5.3"
             - name: SPARK_DRIVER_SA
               value: spark
+            - name: SPARK_JOB_HARD_TIMEOUT_SECONDS
+              value: "600"
+            - name: SPARK_JOB_WATCH_INTERVAL_SECONDS
+              value: "5"
+            - name: SPARK_JOB_WATCHER_ENABLED
+              value: "true"
           resources:
             requests:
               cpu: 50m

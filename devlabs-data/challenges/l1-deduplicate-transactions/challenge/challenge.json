@@ -1,0 +1,121 @@
+{
+  "id": "l1-deduplicate-transactions",
+  "number": 10,
+  "title": "Deduplicate Transactions",
+  "contentSource": "minio",
+  "description": "The POS bridge sometimes retries a ticket and the lake ends up with duplicate txn_ids. Keep one row per txn_id \u2014 the latest by event_ts (tie-break store_id asc). Use a window row_number; dropDuplicates alone is not enough. Output: txn_id, store_id, product_id, quantity, event_ts. Write Parquet with overwrite. Run uses smoke testcases; Submit row-diffs against expected/.",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "window",
+    "dedup",
+    "dataframe",
+    "parquet"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "overview": "Keep one row per txn_id (latest event_ts); write Parquet to OUTPUT_PATH.",
+    "symptoms": [
+      "Duplicate txn_ids inflate counts and revenue.",
+      "Retries land as near-identical rows with later event_ts."
+    ],
+    "yourTaskSteps": [
+      "Read INPUT_PATH Parquet.",
+      "row_number over partition txn_id ordered by event_ts desc, store_id asc; keep rn=1.",
+      "Write txn_id, store_id, product_id, quantity, event_ts to OUTPUT_PATH.",
+      "Submit is graded with a row-level compare against each selected testcase expected/."
+    ],
+    "yourTask": "Implement src/main.py that deduplicates transactions by latest event_ts.",
+    "hints": [
+      "Window.partitionBy(\"txn_id\").orderBy(col(\"event_ts\").desc(), col(\"store_id\").asc())",
+      "filter(col(\"rn\") == 1).drop(\"rn\")",
+      "dropDuplicates([\"txn_id\"]) does not guarantee latest \u2014 do not rely on it alone."
+    ],
+    "inputSchema": [
+      {
+        "column": "txn_id",
+        "type": "INT"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "quantity",
+        "type": "INT"
+      },
+      {
+        "column": "event_ts",
+        "type": "STRING"
+      }
+    ],
+    "expectedOutput": [
+      {
+        "column": "txn_id",
+        "description": "Unique after dedup (grade key)"
+      },
+      {
+        "column": "store_id",
+        "description": "From the winning row"
+      },
+      {
+        "column": "product_id",
+        "description": "From the winning row"
+      },
+      {
+        "column": "quantity",
+        "description": "From the winning row"
+      },
+      {
+        "column": "event_ts",
+        "description": "Latest timestamp for that txn_id"
+      }
+    ]
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-deduplicate-transactions/testcases/",
+    "runCases": [
+      "01-smoke-basic",
+      "02-smoke-dupes"
+    ],
+    "submitCases": [
+      "03-full-mix",
+      "04-full-heavy-dupes",
+      "05-full-unique",
+      "06-full-ties",
+      "07-full-balanced",
+      "08-full-stress"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-deduplicate-transactions/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-deduplicate-transactions/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "txn_id"
+    ],
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g"
+    },
+    "gradeChecks": [
+      "Spark job succeeds on selected Submit testcases",
+      "OUTPUT_PATH has one row per txn_id (latest event_ts)",
+      "Each Submit testcase expected/ matches candidate rows"
+    ]
+  }
+}

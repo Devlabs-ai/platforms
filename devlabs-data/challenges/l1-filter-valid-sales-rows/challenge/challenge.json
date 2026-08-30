@@ -1,0 +1,102 @@
+{
+  "id": "l1-filter-valid-sales-rows",
+  "number": 1,
+  "title": "Filter Valid Sales Rows",
+  "contentSource": "minio",
+  "description": "Vesper Markets closes every store each night and drops a single Parquet sales file into the data lake. This morning Finance opened their dashboard and the overnight revenue numbers looked wrong \u2014 cancelled tickets, missing products, wild quantities, and odd currencies had slipped into the feed.\n\nYour job is to clean that overnight drop before the BI team aggregates it. Read the input Parquet from `INPUT_PATH`, keep only rows that Finance can safely total, and write the cleaned dataset as Parquet to `OUTPUT_PATH`.\n\n**Do not repair values; if a row fails any rule, drop it.**\n\nThe file has ten columns: `transaction_id`, `store_id`, `product_id`, `customer_id`, `quantity`, `unit_price`, `discount_pct`, `currency`, `status`, and `transaction_timestamp`. Most columns are already well-formed in the seed data and should simply be preserved. Only four fields are under validation:\n\n- `product_id` must not be null\n- `quantity` must not be null, must be greater than 0, and must be less than or equal to 100\n- `currency` must be one of `USD`, `EUR`, or `GBP`\n- `status` must equal `COMPLETED`\n\nA row is valid only when every check above passes. Implement the filter with Spark DataFrame APIs.\n\n**Note: Prefer DataFrame transformations \u2014 do not collect rows and filter them in Python loops.**",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "filter",
+    "dataframe",
+    "parquet"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "hints": [],
+    "inputSchema": [
+      {
+        "column": "transaction_id",
+        "type": "STRING"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "customer_id",
+        "type": "INT"
+      },
+      {
+        "column": "quantity",
+        "type": "INT"
+      },
+      {
+        "column": "unit_price",
+        "type": "DECIMAL(10,2)"
+      },
+      {
+        "column": "discount_pct",
+        "type": "DECIMAL(5,2)"
+      },
+      {
+        "column": "currency",
+        "type": "STRING"
+      },
+      {
+        "column": "status",
+        "type": "STRING"
+      },
+      {
+        "column": "transaction_timestamp",
+        "type": "TIMESTAMP"
+      }
+    ]
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-filter-valid-sales-rows/testcases/",
+    "runCases": [
+      "01-smoke-basic",
+      "02-smoke-edges"
+    ],
+    "submitCases": [
+      "03-full-mix",
+      "04-full-nulls",
+      "05-full-quantity",
+      "06-full-quantity-cap",
+      "07-full-currency",
+      "08-full-status",
+      "09-full-balanced",
+      "10-full-stress"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-filter-valid-sales-rows/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-filter-valid-sales-rows/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "transaction_id"
+    ],
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g"
+    },
+    "gradeChecks": [
+      "Once the Spark job succeeds, we evaluate your output against the expected results for every Submit testcase. Pass all cases to mark this lab Solved."
+    ]
+  }
+}

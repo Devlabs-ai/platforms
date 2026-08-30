@@ -1,0 +1,8 @@
+[
+  "Reuse the Aggregate Product Totals line_revenue formula, then groupBy product_id.",
+  "Window.orderBy(col(\"total_revenue\").desc(), col(\"product_id\").asc()) + dense_rank().",
+  "Filter rank <= 10 after ranking — a blind limit(10) drops tied products incorrectly.",
+  "discount_pct is a fraction (0.10 = 10%), already between 0 and 0.50.",
+  "spark.read.parquet(INPUT_PATH) reads every staged testcase file.",
+  "OUTPUT_PATH is unique per Run/Submit — overwrite does not clear prior jobs' results."
+]

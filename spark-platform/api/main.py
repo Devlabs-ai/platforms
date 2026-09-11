@@ -19,7 +19,9 @@ from pydantic import BaseModel, Field, model_validator
 NAMESPACE = os.environ.get("SPARK_NAMESPACE", "spark")
 EVENT_LOG_DIR = os.environ.get("SPARK_EVENT_LOG_DIR", "file:/mnt/spark-events")
 HISTORY_UI_URL = os.environ.get("SPARK_HISTORY_UI_URL", "http://localhost:30080")
-SPARK_IMAGE = os.environ.get("SPARK_IMAGE", "apache/spark:3.5.3")
+# Hadoop-AWS is baked into this image (see spark-platform/spark-image/).
+# Override with SPARK_IMAGE if you still need a stock apache/spark tag.
+SPARK_IMAGE = os.environ.get("SPARK_IMAGE", "rithvikreddyalkanti/spark:3.5.3-s3a")
 SPARK_VERSION = os.environ.get("SPARK_VERSION", "3.5.3")
 DRIVER_SA = os.environ.get("SPARK_DRIVER_SA", "spark")
 
@@ -317,10 +319,12 @@ def _env_list(env: dict[str, str]) -> list[dict[str, str]]:
 
 
 def _default_s3a_spark_conf() -> dict[str, str]:
+    # S3A jars live in SPARK_IMAGE (/opt/spark/jars). Do not set
+    # spark.jars.packages here — Ivy resolved them into /tmp/.ivy2 on every
+    # new driver/executor pod and dominated L1 cold-start time.
     return {
         "spark.eventLog.enabled": "true",
         "spark.eventLog.dir": EVENT_LOG_DIR,
-        "spark.jars.ivy": "/tmp/.ivy2",
         "spark.sql.shuffle.partitions": "8",
         "spark.sql.adaptive.enabled": "true",
         "spark.hadoop.fs.s3a.endpoint": MINIO_ENDPOINT,
@@ -329,10 +333,6 @@ def _default_s3a_spark_conf() -> dict[str, str]:
         "spark.hadoop.fs.s3a.path.style.access": "true",
         "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem",
         "spark.hadoop.fs.s3a.connection.ssl.enabled": "false",
-        "spark.jars.packages": (
-            "org.apache.hadoop:hadoop-aws:3.3.4,"
-            "com.amazonaws:aws-java-sdk-bundle:1.12.262"
-        ),
     }
 
 

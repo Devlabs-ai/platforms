@@ -2,25 +2,18 @@
   "contentSource": "minio",
   "testcasesPrefix": "s3a://devlabs-data/challenges/l1-filter-valid-sales-rows/testcases/",
   "runCases": [
-    "01-smoke-basic",
-    "02-smoke-edges"
+    "01-run-edges"
   ],
   "submitCases": [
-    "03-full-mix",
-    "04-full-nulls",
-    "05-full-quantity",
-    "06-full-quantity-cap",
-    "07-full-currency",
-    "08-full-status",
-    "09-full-balanced",
-    "10-full-stress"
+    "02-submit-all"
   ],
   "inputPath": "s3a://devlabs-data/challenges/l1-filter-valid-sales-rows/testcases/",
   "evalSolutionPath": "s3a://devlabs-data/challenges/l1-filter-valid-sales-rows/testcases/",
   "outputFormat": "parquet",
   "gradeKeys": [
-    "transaction_id"
+    "txn_id"
   ],
+  "gradeScript": "s3a://devlabs-data/challenges/l1-filter-valid-sales-rows/grade/grade.py",
   "language": "python",
   "starterFileName": "src/main.py",
   "limits": {
@@ -28,9 +21,14 @@
     "driverMemory": "1g",
     "executors": 2,
     "executorCores": 1,
-    "executorMemory": "1g"
+    "executorMemory": "1g",
+    "aqe": false
+  },
+  "sparkConf": {
+    "spark.sql.adaptive.enabled": "false"
   },
   "gradeChecks": [
-    "Once the Spark job succeeds, we evaluate your output against the expected results for every Submit testcase. Pass all cases to mark this lab Solved."
+    "Functional: candidate Parquet matches expected row by row on txn_id (all columns)",
+    "Performance: not specified for this lab"
   ]
 }

@@ -1,6 +1,0 @@
-[
-  "createOrReplaceTempView(\"sales\") then spark.sql(...)",
-  "ROUND(quantity * unit_price * (1 - discount_pct), 2) per line before SUM",
-  "COUNT(DISTINCT store_id) for store_count",
-  "Do not use DataFrame groupBy/agg for the solution path."
-]

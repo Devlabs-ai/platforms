@@ -7,6 +7,18 @@ Not challenge testcases — shared practice data under MinIO:
 s3a://devlabs-data/datasets/<family>/…
 ```
 
+## vesper
+
+Vesper Markets overnight **sales fact** (15 columns). Shared by the L1 Spark sequence. Challenge testcases copy this drop and plant lab-specific dirt — do not edit the clean files.
+
+| Path | Contents |
+|------|----------|
+| `vesper/sales/100k/` | 100,000 clean line-item sales |
+
+```bash
+python3 datasets/vesper/generate.py --upload
+```
+
 ## payment-network
 
 Bank / card-network style transactions + opcode-style dimension tables.
@@ -21,7 +33,7 @@ Bank / card-network style transactions + opcode-style dimension tables.
 | `payment-network/txns/1m-skew-key60/` | ~1M txns, 60% on one `(mcc, country_code, entry_mode)` triple |
 | `payment-network/txns/50m-skew-key60/` | ~50M txns, same 60% join-key skew |
 | `payment-network/txns/1m-skew-key75/` | ~1M txns, 75% on the hot triple |
-| `payment-network/txns/100m-skew-key75/` | ~100M txns, **wide 15-col** schema; 75% on the hot triple |
+| `payment-network/txns/150m-skew-key75/` | ~150M txns, **wide 15-col** schema; 75% on the hot triple |
 | `payment-network/dims/country/` | ISO country codes |
 | `payment-network/dims/mcc/` | Merchant Category Codes |
 | `payment-network/dims/currency/` | ISO currencies |
@@ -71,11 +83,14 @@ The suffix number is the target share of rows, solved exactly: rows that are not
 forced still land on the triple by chance, so the generator overwrites with
 probability `(target − natural) / (1 − natural)`.
 
-Note that `100m-skew-key75` inherits the **wide** 15-column schema from the
-`100m*` rule, unlike the 50M drops.
+Note that `150m-skew-key75` (and leftover `100m*` generator sizes) inherit the
+**wide** 15-column schema, unlike the smaller 12-col drops. `50m-skew-key75` is
+also wide so a plan can be shaped on a third of the scan.
 
 ```bash
 python3 datasets/payment-network/generate.py --sizes 1m-skew-key60 --upload --skip-dims
 python3 datasets/payment-network/generate.py --sizes 50m-skew-key60 --upload --skip-dims
-python3 datasets/payment-network/generate.py --sizes 100m-skew-key75 --upload --skip-dims
+python3 datasets/payment-network/generate.py --sizes 150m-skew-key75 --upload --skip-dims
+# reclaim the old 100M drop first:
+# python3 datasets/payment-network/generate.py --sizes 150m-skew-key75 --delete-sizes 100m-skew-key75 --upload --skip-dims
 ```

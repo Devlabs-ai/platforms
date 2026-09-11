@@ -1,0 +1,232 @@
+{
+  "id": "l1-store-rollup-totals",
+  "number": 6,
+  "title": "The Totals That Stacked",
+  "contentSource": "minio",
+  "description": "# The Totals That Stacked\n\n> **Who is asking**\n>\n> **District** is Vesper's regional store-ops team. They manage a group of stores. It is not a column on the file.\n\nVesper still drops one overnight Parquet file. District wants a revenue report with **subtotals at multiple levels** — not three separate queries. They want one output with detail rows, store subtotals, and a grand total.\n\nThis is a **ROLLUP**. Spark builds the subtotal rows for you.\n\n**Dimensions:** `store_id` and `payment_method` (card, cash, wallet).\n\n**Three types of rows in your output:**\n\n1. **Detail rows:** Both `store_id` and `payment_method` are present. Revenue for store 5, card payments.\n2. **Store subtotal rows:** `store_id` is present, `payment_method` is NULL. Total revenue for store 5 across all payment methods.\n3. **Grand total row:** Both `store_id` and `payment_method` are NULL. Total revenue across all stores and payment methods.\n\nKeep only POS completed tickets. Calculate revenue: `round(quantity * unit_price * (1 - discount_pct), 2)` per line, then sum by group.\n\nRead from `INPUT_PATH`. Write to `OUTPUT_PATH`.\n\nUse Spark DataFrame ROLLUP. Do not write separate groupBy queries.\n\n## Rules\n\nThese must all be true for your output:\n\n- **Floor.** Keep only `channel = POS` and `status = COMPLETED` tickets.\n- **Revenue calculation.** `round(qty * price * (1 - discount_pct), 2)` per line, then sum.\n- **ROLLUP syntax.** Use `rollup(\"store_id\", \"payment_method\")` or `groupBy(F.rollup(...))`.\n- **Detail rows.** Both `store_id` and `payment_method` are NOT NULL.\n- **Store subtotals.** `store_id` NOT NULL, `payment_method` is NULL.\n- **Grand total.** Both `store_id` and `payment_method` are NULL.\n- **Columns.** Write `store_id` (INT, nullable), `payment_method` (STRING, nullable), `total_revenue` (DECIMAL(12,2)), `ticket_count` (LONG).\n\nNULL in the output marks a subtotal row. Do not filter out NULLs or write three separate aggregations.\n\n> **What you write**\n>\n> Detail rows + store subtotals + grand total in one Parquet file. Run and Submit are different nights — do not hard-code the example values.\n\n## Example\n\nToy file (shown columns only). All rows are already POS + COMPLETED.\n\n| txn_id | store_id | payment_method | quantity | unit_price | discount_pct |\n| --- | --- | --- | --- | --- | --- |\n| t1 | 5 | card | 2 | 10.00 | 0.00 |\n| t2 | 5 | card | 1 | 10.00 | 0.10 |\n| t3 | 5 | cash | 3 | 10.00 | 0.00 |\n| t4 | 9 | card | 1 | 50.00 | 0.00 |\n\n**Line revenue:**\n- t1: 2 * 10.00 * 1.00 = 20.00\n- t2: 1 * 10.00 * 0.90 = 9.00\n- t3: 3 * 10.00 * 1.00 = 30.00\n- t4: 1 * 50.00 * 1.00 = 50.00\n\n**Output (with ROLLUP)**\n\n| store_id | payment_method | total_revenue | ticket_count | Row Type |\n| --- | --- | --- | --- | --- |\n| 5 | card | 29.00 | 2 | Detail |\n| 5 | cash | 30.00 | 1 | Detail |\n| 5 | NULL | 59.00 | 3 | Store 5 subtotal |\n| 9 | card | 50.00 | 1 | Detail |\n| 9 | NULL | 50.00 | 1 | Store 9 subtotal |\n| NULL | NULL | 109.00 | 4 | Grand total |\n\nExplanation:\n- Rows 1-2: Store 5 broken down by payment method\n- Row 3: Store 5 subtotal (payment_method = NULL)\n- Row 4: Store 9 detail (only has card)\n- Row 5: Store 9 subtotal\n- Row 6: Grand total (both columns NULL)\n\nCommon mistakes:\n- Three separate `groupBy()` calls instead of one `rollup()`\n- Filtering out NULL rows (those are the subtotals you need)\n- Wrong rollup order: `rollup(payment_method, store_id)` rolls up the wrong dimension first\n\n## What ROLLUP does\n\n```python\ndf.rollup(\"store_id\", \"payment_method\").agg(...)\n```\n\nThis creates rows at three levels:\n1. `(store_id=5, payment_method=card)` — detail\n2. `(store_id=5, payment_method=NULL)` — subtotal for store 5\n3. `(store_id=NULL, payment_method=NULL)` — grand total\n\nYou get **detail rows + subtotal rows + grand total** in one output.\n",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "dataframe",
+    "parquet",
+    "aggregate",
+    "rollup"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "hints": [],
+    "data": {
+      "overview": "Vesper overnight sales fact (15 columns). POS completed only. Calculate revenue per line, ROLLUP by store_id + payment_method to get detail + subtotals + grand total.",
+      "testcases": {
+        "run": [
+          {
+            "name": "01-rollup",
+            "rows": "varies (detail + subtotals + 1 grand total)",
+            "detail": "20,000 input rows; ~20 stores; output has detail rows + store subtotals + grand total"
+          }
+        ],
+        "submit": [
+          {
+            "name": "02-rollup",
+            "rows": "varies (detail + subtotals + 1 grand total)",
+            "detail": "100,000 input rows; ~50 stores; different payment patterns than Run"
+          }
+        ]
+      },
+      "datasets": [
+        {
+          "name": "Overnight sales",
+          "env": "INPUT_PATH",
+          "kind": "fact",
+          "schema": [
+            {
+              "column": "txn_id",
+              "type": "STRING"
+            },
+            {
+              "column": "store_id",
+              "type": "INT"
+            },
+            {
+              "column": "register_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_code",
+              "type": "STRING"
+            },
+            {
+              "column": "customer_id",
+              "type": "INT"
+            },
+            {
+              "column": "quantity",
+              "type": "INT"
+            },
+            {
+              "column": "unit_price",
+              "type": "DECIMAL(10,2)"
+            },
+            {
+              "column": "discount_pct",
+              "type": "DECIMAL(5,2)"
+            },
+            {
+              "column": "currency",
+              "type": "STRING"
+            },
+            {
+              "column": "status",
+              "type": "STRING"
+            },
+            {
+              "column": "channel",
+              "type": "STRING"
+            },
+            {
+              "column": "payment_method",
+              "type": "STRING"
+            },
+            {
+              "column": "country_code",
+              "type": "STRING"
+            },
+            {
+              "column": "event_ts",
+              "type": "TIMESTAMP"
+            }
+          ]
+        }
+      ]
+    },
+    "inputSchema": [
+      {
+        "column": "txn_id",
+        "type": "STRING"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "register_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_code",
+        "type": "STRING"
+      },
+      {
+        "column": "customer_id",
+        "type": "INT"
+      },
+      {
+        "column": "quantity",
+        "type": "INT"
+      },
+      {
+        "column": "unit_price",
+        "type": "DECIMAL(10,2)"
+      },
+      {
+        "column": "discount_pct",
+        "type": "DECIMAL(5,2)"
+      },
+      {
+        "column": "currency",
+        "type": "STRING"
+      },
+      {
+        "column": "status",
+        "type": "STRING"
+      },
+      {
+        "column": "channel",
+        "type": "STRING"
+      },
+      {
+        "column": "payment_method",
+        "type": "STRING"
+      },
+      {
+        "column": "country_code",
+        "type": "STRING"
+      },
+      {
+        "column": "event_ts",
+        "type": "TIMESTAMP"
+      }
+    ],
+    "expectedOutput": [
+      {
+        "column": "store_id",
+        "description": "Store identifier (nullable — NULL marks subtotal rows)"
+      },
+      {
+        "column": "payment_method",
+        "description": "Payment type: card/cash/wallet (nullable — NULL marks store subtotal or grand total)"
+      },
+      {
+        "column": "total_revenue",
+        "description": "DECIMAL(12,2) sum of round(qty * price * (1-disc), 2)"
+      },
+      {
+        "column": "ticket_count",
+        "description": "LONG count of transactions in this group"
+      }
+    ],
+    "moat": "Setter notes — not shown to learners.\n\n## What was in mind\n\nLab 6 of the **Vesper** overnight-sales sequence. Same 15-column fact. This lab teaches ROLLUP for multi-level aggregation.\n\nThe line we wanted: filter POS + COMPLETED → calculate revenue per line → rollup(store_id, payment_method) → sum + count.\n\nThe learner brief lists those constraints as rules, not a recipe. Intended order is filter → withColumn revenue → rollup → aggregate.\n\n| Step | Transform | Kind |\n| --- | --- | --- |\n| floor | `filter` POS + COMPLETED | narrow |\n| revenue | `withColumn` `round(qty*price*(1-disc), 2)` | narrow |\n| rollup | `rollup(store_id, payment_method)` | wide — shuffle |\n| agg | `sum`, `count` | aggregate |\n\nKey teaching points:\n1. ROLLUP syntax (different from groupBy)\n2. NULL markers identify subtotal/grand total rows\n3. Order matters: rollup(A, B) rolls up B first, then A\n4. Output contains mixed detail and aggregate rows\n\nThe question we wanted a failed Submit to answer: **did you use ROLLUP, or three separate groupBy? Did you filter out NULLs?**\n\n## How we created the cases\n\nAll rows are POS + COMPLETED already (floor is trivial). Payment methods mixed across stores. Some stores have all 3 payment types, some have 1-2.\n\n1. **`01-rollup` (20k, Run)** — stores 10-29 (20 stores)\n2. **`02-rollup` (100k, Submit)** — stores 50-99 (50 stores)\n\nOracle is `solution/solve.py` (Python calculates same rollup output as Spark). Grade is row-diff on composite key [store_id, payment_method].\n\n## Output structure\n\n- Detail rows: store_id NOT NULL, payment_method NOT NULL\n- Store subtotals: store_id NOT NULL, payment_method NULL  \n- Grand total: store_id NULL, payment_method NULL\n\nExpected row count: detail_rows + num_stores + 1\n"
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-store-rollup-totals/testcases/",
+    "runCases": [
+      "01-rollup"
+    ],
+    "submitCases": [
+      "02-rollup"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-store-rollup-totals/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-store-rollup-totals/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "store_id",
+      "payment_method"
+    ],
+    "gradeScript": "s3a://devlabs-data/challenges/l1-store-rollup-totals/grade/grade.py",
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g",
+      "aqe": false,
+      "shufflePartitions": 8,
+      "hardTimeoutSeconds": 120
+    },
+    "sparkConf": {
+      "spark.sql.adaptive.enabled": "false",
+      "spark.sql.shuffle.partitions": "8"
+    },
+    "gradeChecks": [
+      "Functional: candidate Parquet has detail + store subtotal + grand total rows with correct revenue",
+      "Performance: not specified for this lab"
+    ]
+  }
+}

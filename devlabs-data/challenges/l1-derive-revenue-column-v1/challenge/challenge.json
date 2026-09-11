@@ -1,0 +1,127 @@
+{
+  "id": "l1-derive-revenue-column-v1",
+  "number": 20,
+  "title": "Derive Revenue Column (v1)",
+  "contentSource": "minio",
+  "description": "Acme\u2019s overnight sales Parquet is already cleaned \u2014 every row is a completed line Finance trusts. What BI still lacks is a single line revenue figure they can sum without re-deriving discounts in every dashboard.\n\nYour job is to add a `revenue` column to each row and write the enriched Parquet with overwrite. Keep every input column unchanged; only append `revenue`.\n\nFormula: `revenue = quantity * unit_price * (1 - discount_pct)`, rounded to 2 decimal places as `DECIMAL(12,2)`. `discount_pct` is a fraction in `[0, 0.50]` (for example `0.10` means 10% off), not a whole-number percent.\n\nInput columns: `transaction_id`, `store_id`, `product_id`, `customer_id`, `quantity`, `unit_price`, `discount_pct`, `currency`, `status`, `transaction_timestamp`. Implement with Spark DataFrame APIs (`withColumn`, arithmetic, cast) \u2014 no Python loops over collected rows. **Run** uses two smoke testcases; **Submit** uses the full set and row-diffs your Parquet against each case\u2019s `expected/`.",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "withcolumn",
+    "dataframe",
+    "parquet"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "overview": "Add a DECIMAL(12,2) revenue column: quantity \u00d7 unit_price \u00d7 (1 \u2212 discount_pct), keep all input columns, write Parquet to OUTPUT_PATH.",
+    "symptoms": [
+      "BI dashboards re-derive discounts differently and disagree on overnight totals.",
+      "Finance wants a single line revenue field on every sales row."
+    ],
+    "yourTaskSteps": [
+      "Read input Parquet from INPUT_PATH (platform stages selected testcase inputs).",
+      "Add revenue = quantity * unit_price * (1 - discount_pct) as DECIMAL(12,2).",
+      "Preserve all input columns; append revenue; write Parquet to OUTPUT_PATH with overwrite.",
+      "Submit is graded with a row-level compare against each selected testcase expected/."
+    ],
+    "yourTask": "Implement src/main.py that derives revenue and writes Parquet output.",
+    "hints": [
+      "Use withColumn to append revenue without dropping other columns.",
+      "Cast intermediates to decimal before multiplying if you need stable scale.",
+      "discount_pct is a fraction (0.10 = 10%), already between 0 and 0.50.",
+      "spark.read.parquet(INPUT_PATH) reads every staged testcase file."
+    ],
+    "inputSchema": [
+      {
+        "column": "transaction_id",
+        "type": "STRING"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "customer_id",
+        "type": "INT"
+      },
+      {
+        "column": "quantity",
+        "type": "INT"
+      },
+      {
+        "column": "unit_price",
+        "type": "DECIMAL(10,2)"
+      },
+      {
+        "column": "discount_pct",
+        "type": "DECIMAL(5,2)"
+      },
+      {
+        "column": "currency",
+        "type": "STRING"
+      },
+      {
+        "column": "status",
+        "type": "STRING"
+      },
+      {
+        "column": "transaction_timestamp",
+        "type": "TIMESTAMP"
+      }
+    ],
+    "expectedOutput": [
+      {
+        "column": "revenue",
+        "description": "DECIMAL(12,2) = quantity * unit_price * (1 - discount_pct), half-up to 2 dp"
+      }
+    ]
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-derive-revenue-column-v1/testcases/",
+    "runCases": [
+      "01-smoke-basic",
+      "02-smoke-edges"
+    ],
+    "submitCases": [
+      "03-full-mix",
+      "04-full-zero-discount",
+      "05-full-high-discount",
+      "06-full-qty-edges",
+      "07-full-price-edges",
+      "08-full-balanced",
+      "09-full-stress"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-derive-revenue-column-v1/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-derive-revenue-column-v1/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "transaction_id"
+    ],
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g"
+    },
+    "gradeChecks": [
+      "Spark job succeeds on selected Submit testcases",
+      "OUTPUT_PATH Parquet readable with input columns plus revenue",
+      "Each Submit testcase expected/ matches candidate rows (key + values)",
+      "No extra rows beyond the union of selected expected testcases"
+    ]
+  }
+}

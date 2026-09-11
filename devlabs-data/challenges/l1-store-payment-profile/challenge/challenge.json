@@ -1,0 +1,139 @@
+{
+  "id": "l1-store-payment-profile",
+  "number": 7,
+  "title": "The Methods They Accepted",
+  "contentSource": "minio",
+  "description": "# The Methods They Accepted\n\n> **Who is asking**\n>\n> **Finance** is Vesper's treasury and payment operations team. They manage payment processing fees, cash handling costs, and banking relationships. They are not District (store ops) or Science (data science). Finance is not a column.\n\nVesper still drops one overnight Parquet file. Finance needs to know **which payment methods each store accepts** — not just revenue totals.\n\nCard transactions cost 2.5% in processing fees. Cash requires armored transport. Wallet payments need different infrastructure.\n\nFinance wants **one row per store** showing:\n- Which payment methods that store used (card, cash, wallet)\n- Total revenue\n- Transaction count\n- How many different payment types\n\nThey'll use this to negotiate processor contracts, plan cash pickup routes, and identify card-only stores.\n\nKeep only POS completed tickets. Calculate revenue: `round(quantity * unit_price * (1 - discount_pct), 2)` per line.\n\nRead from `INPUT_PATH`. Write to `OUTPUT_PATH`.\n\nUse Spark DataFrame with `collect_set` aggregation.\n\n## Rules\n\nThese must all be true for your output:\n\n- **Floor.** Keep only `channel = POS` and `status = COMPLETED` tickets.\n- **Revenue calculation.** `round(qty * price * (1 - discount_pct), 2)` per line, then sum.\n- **Group by store.** One output row per `store_id`.\n- **`payment_methods`.** Use `collect_set(\"payment_method\")` to get distinct payment types as an array. Order is undefined.\n- **`total_revenue`.** Sum of line revenue as `DECIMAL(12,2)`.\n- **`ticket_count`.** Count of transactions (`LONG`).\n- **`payment_variety`.** `countDistinct(\"payment_method\")` as `INT` — how many different payment types.\n- **Columns.** Write `store_id`, `payment_methods` (ARRAY<STRING>), `total_revenue`, `ticket_count`, `payment_variety`.\n\n`collect_set` returns an **ARRAY** column, not a concatenated string. The array order is undefined — `[card, cash]` and `[cash, card]` are equivalent.\n\n> **What you write**\n>\n> One row per store with payment methods collected into an array. Run and Submit are different nights — do not hard-code the example values.\n\n## Example\n\nToy file (shown columns only). All rows are already POS + COMPLETED.\n\n| txn_id | store_id | payment_method | quantity | unit_price | discount_pct |\n| --- | --- | --- | --- | --- | --- |\n| t1 | 5 | card | 2 | 10.00 | 0.00 |\n| t2 | 5 | cash | 1 | 10.00 | 0.10 |\n| t3 | 5 | card | 3 | 10.00 | 0.00 |\n| t4 | 9 | card | 1 | 50.00 | 0.00 |\n| t5 | 9 | card | 2 | 10.00 | 0.00 |\n\n**Line revenue:**\n- t1: 2 * 10.00 * 1.00 = 20.00\n- t2: 1 * 10.00 * 0.90 = 9.00\n- t3: 3 * 10.00 * 1.00 = 30.00\n- t4: 1 * 50.00 * 1.00 = 50.00\n- t5: 2 * 10.00 * 1.00 = 20.00\n\n**Output**\n\n| store_id | payment_methods | total_revenue | ticket_count | payment_variety |\n| --- | --- | --- | --- | --- |\n| 5 | [card, cash] | 59.00 | 3 | 2 |\n| 9 | [card] | 70.00 | 2 | 1 |\n\nExplanation:\n- Store 5: Used both card and cash. Array could be `[card, cash]` or `[cash, card]` — order is undefined.\n- Store 9: Only used card. Array is `[card]`.\n- `payment_variety` matches the length of the `payment_methods` array.\n\nFinance interpretation:\n- **Store 5**: Needs card processor + cash transport (2 infrastructures)\n- **Store 9**: Card-only, simpler (1 infrastructure)\n\nCommon mistakes:\n- Using `collect_list` instead of `collect_set` (includes duplicates)\n- Concatenating into a string instead of keeping as array\n- Comparing arrays by exact order instead of set equality\n- Forgetting to calculate revenue per line before aggregating\n\n## What collect_set does\n\n```python\ndf.groupBy(\"store_id\").agg(\n    F.collect_set(\"payment_method\").alias(\"payment_methods\"),\n    F.sum(\"line_revenue\").alias(\"total_revenue\"),\n    F.count(\"*\").alias(\"ticket_count\"),\n    F.countDistinct(\"payment_method\").alias(\"payment_variety\")\n)\n```\n\n`collect_set`:\n- Aggregates all distinct values into an array\n- Removes duplicates (unlike `collect_list`)\n- Order is undefined (Spark's choice)\n- Returns `ARRAY<STRING>` type\n",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "dataframe",
+    "parquet",
+    "aggregate",
+    "collect_set"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "hints": [],
+    "data": {
+      "overview": "Vesper overnight sales fact (15 columns). POS completed only. Calculate revenue per line, groupBy store_id with collect_set to get payment methods array + revenue + count.",
+      "testcases": {
+        "run": [
+          {
+            "name": "01-profile",
+            "rows": "20 stores",
+            "detail": "20,000 input rows; stores 10-29; varied payment method patterns"
+          }
+        ],
+        "submit": [
+          {
+            "name": "02-profile",
+            "rows": "50 stores",
+            "detail": "100,000 input rows; stores 50-99; different payment patterns than Run"
+          }
+        ]
+      },
+      "datasets": [
+        {
+          "name": "Overnight sales",
+          "env": "INPUT_PATH",
+          "kind": "fact",
+          "schema": [
+            {"column": "txn_id", "type": "STRING"},
+            {"column": "store_id", "type": "INT"},
+            {"column": "register_id", "type": "INT"},
+            {"column": "product_id", "type": "INT"},
+            {"column": "product_code", "type": "STRING"},
+            {"column": "customer_id", "type": "INT"},
+            {"column": "quantity", "type": "INT"},
+            {"column": "unit_price", "type": "DECIMAL(10,2)"},
+            {"column": "discount_pct", "type": "DECIMAL(5,2)"},
+            {"column": "currency", "type": "STRING"},
+            {"column": "status", "type": "STRING"},
+            {"column": "channel", "type": "STRING"},
+            {"column": "payment_method", "type": "STRING"},
+            {"column": "country_code", "type": "STRING"},
+            {"column": "event_ts", "type": "TIMESTAMP"}
+          ]
+        }
+      ]
+    },
+    "inputSchema": [
+      {"column": "txn_id", "type": "STRING"},
+      {"column": "store_id", "type": "INT"},
+      {"column": "register_id", "type": "INT"},
+      {"column": "product_id", "type": "INT"},
+      {"column": "product_code", "type": "STRING"},
+      {"column": "customer_id", "type": "INT"},
+      {"column": "quantity", "type": "INT"},
+      {"column": "unit_price", "type": "DECIMAL(10,2)"},
+      {"column": "discount_pct", "type": "DECIMAL(5,2)"},
+      {"column": "currency", "type": "STRING"},
+      {"column": "status", "type": "STRING"},
+      {"column": "channel", "type": "STRING"},
+      {"column": "payment_method", "type": "STRING"},
+      {"column": "country_code", "type": "STRING"},
+      {"column": "event_ts", "type": "TIMESTAMP"}
+    ],
+    "expectedOutput": [
+      {
+        "column": "store_id",
+        "description": "Store identifier"
+      },
+      {
+        "column": "payment_methods",
+        "description": "Array of distinct payment methods (ARRAY<STRING>)"
+      },
+      {
+        "column": "total_revenue",
+        "description": "DECIMAL(12,2) sum of round(qty * price * (1-disc), 2)"
+      },
+      {
+        "column": "ticket_count",
+        "description": "LONG count of transactions"
+      },
+      {
+        "column": "payment_variety",
+        "description": "INT count of distinct payment methods"
+      }
+    ],
+    "moat": "Lab 7 of the Vesper overnight-sales sequence. Teaches collect_set aggregation with arrays. Filter POS + COMPLETED → calculate revenue per line → groupBy store_id with collect_set + sum + count + countDistinct."
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-store-payment-profile/testcases/",
+    "runCases": ["01-profile"],
+    "submitCases": ["02-profile"],
+    "inputPath": "s3a://devlabs-data/challenges/l1-store-payment-profile/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-store-payment-profile/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": ["store_id"],
+    "gradeScript": "s3a://devlabs-data/challenges/l1-store-payment-profile/grade/grade.py",
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g",
+      "aqe": false,
+      "shufflePartitions": 8,
+      "hardTimeoutSeconds": 120
+    },
+    "sparkConf": {
+      "spark.sql.adaptive.enabled": "false",
+      "spark.sql.shuffle.partitions": "8"
+    },
+    "gradeChecks": [
+      "Functional: candidate Parquet has correct payment methods arrays and aggregations per store",
+      "Performance: not specified for this lab"
+    ]
+  }
+}

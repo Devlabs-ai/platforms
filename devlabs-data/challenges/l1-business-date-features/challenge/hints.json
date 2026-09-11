@@ -1,8 +1,0 @@
-[
-  "to_date(col(\"event_ts\")) yields the calendar DATE used by year/month/dayofweek.",
-  "Spark dayofweek: 1 = Sunday … 7 = Saturday — don’t assume ISO Monday = 1.",
-  "is_weekend: day_of_week.isin(1, 7).",
-  "days_to_as_of = datediff(to_date(lit(os.environ[\"BUSINESS_DATE\"])), col(\"business_date\")).",
-  "spark.read.parquet(INPUT_PATH) reads every staged testcase file.",
-  "OUTPUT_PATH is unique per Run/Submit — overwrite does not clear prior jobs' results."
-]

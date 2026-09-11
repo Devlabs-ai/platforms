@@ -11,8 +11,8 @@ import time
 import urllib.error
 import urllib.request
 
-PLATFORM = os.environ.get("SPARK_PLATFORM_API_URL", "http://192.168.1.9:30088")
-HISTORY = os.environ.get("SPARK_HISTORY_UI_URL", "http://192.168.1.9:30080")
+PLATFORM = os.environ.get("SPARK_PLATFORM_API_URL", "http://192.168.1.2:30088")
+HISTORY = os.environ.get("SPARK_HISTORY_UI_URL", "http://192.168.1.2:30080")
 BUCKET = "devlabs-data"
 JOB_KEY = "scratch/skew-lab/skew_job.py"
 

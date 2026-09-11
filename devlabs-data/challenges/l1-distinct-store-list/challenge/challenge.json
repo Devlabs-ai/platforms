@@ -1,0 +1,219 @@
+{
+  "id": "l1-distinct-store-list",
+  "number": 4,
+  "title": "The Twelve Doors",
+  "contentSource": "minio",
+  "description": "> **Who is asking**\n>\n> **District** is Vesper’s regional store-ops team. They oversee a group of stores, not one till. It is not a column on the file.\n\nVesper Markets still drops one overnight Parquet file. Labs 1–3 already taught how that file gets cleaned, how POS tickets collapse, and how Audit takes a replayable handful of the floor. This morning is a different request.\n\nDistrict wants a **list of store numbers**, not tickets.\n\n**Keep a store only if it has at least one ticket that is both** `channel = POS` **and** `status = COMPLETED`. From those store numbers, take the **12 smallest**: sort them low to high, then keep 12.\n\n> **What you write**\n>\n> One column: `store_id`. Twelve rows on the overnight drop. Not the 15-column fact. Not one ticket per store. **12** is written here — do not hunt Audit envelopes, and do not copy 2 from the toy table below. Run and Submit are different nights, so the 12 smallest POS-completed store ids can differ. Do not hard-code 1 through 12.\n\nRead the drop from `INPUT_PATH`. Apply the rules below, then write Parquet to `OUTPUT_PATH`.\n\nThe file is the Vesper overnight sales fact (15 columns). After you finish, District wants **12 store numbers**, not 12 tickets.\n\nUse Spark DataFrame APIs. Do not `collect()` the sales table and loop in Python.\n\n## Rules\n\nThese all have to be true of the file you write. They are not a recipe.\n\n- **`channel`.** Keep the ticket only if channel is exactly `POS`. `web` and `app` are out. Do not rewrite tokens.\n- **`status`.** Keep the ticket only if status is exactly `COMPLETED`. `CANCELLED` and `PENDING` are out.\n- **Which stores.** Keep a store only if it has at least one ticket that passed both rules above.\n- **Once.** Write each of those `store_id` values once. Two POS completed tickets at store 5 are still one store.\n- **Order.** Sort `store_id` ascending (5 before 9). Without a sort, `limit` is whoever Spark saw first — the same bug as sampling with no seed.\n- **Twelve.** After the sort, keep the first **12** store ids. The overnight drop has more than 12 such stores. The toy below is smaller, so the example takes 2.\n- **Columns.** Write only `store_id`. Do not add columns. Do not pass the other fourteen through.\n\nUse `distinct` on the store list. Do not keep a full ticket per store. Use `limit` after the store ids are unique and sorted — not a handful of tickets.\n\nAfter you finish, District wants **the same 12 store ids every time this job runs on this drop**. Tomorrow’s drop is a new file — unique that night’s POS completed stores, sort them, take 12.\n\n## Example\n\nToy file (shown columns only). On **this toy** three stores qualify and we take **2**. Your overnight file has its own stores — take **12**. Do not hard-code 5 and 9.\n\n**Input**\n\n| txn_id | store_id | channel | status |\n| --- | --- | --- | --- |\n| t1 | 3 | web | COMPLETED |\n| t2 | 5 | POS | COMPLETED |\n| t3 | 5 | POS | COMPLETED |\n| t4 | 8 | POS | CANCELLED |\n| t5 | 9 | POS | COMPLETED |\n| t6 | 12 | POS | COMPLETED |\n\n**Stores that qualify** (at least one POS completed ticket) — 5, 9, 12.\n\n**Written file** on this toy (`limit` 2)\n\n| store_id |\n| --- |\n| 5 |\n| 9 |\n\n- Store 3 is out — it has no POS ticket.\n- Store 8 is out — it has no completed ticket.\n- Store 5 has two POS completed tickets and is written once.\n- Store 12 qualifies but is not in the first 2. On the overnight drop the same idea: qualifying stores after the 12th are out.\n\nIf you unique the whole file first, store 3 and 8 count. Sorted `limit` 2 becomes **3, 5**.\n\nIf you take two tickets first, you might write 3, or 5, or 8 — not the two smallest qualifying store ids.\n",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "dataframe",
+    "parquet",
+    "distinct",
+    "limit"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "hints": [],
+    "data": {
+      "overview": "Vesper overnight sales fact (15 columns). Mixed channel and status. Keep a store only if it has at least one POS completed ticket. Output is the 12 smallest of those store ids, one column.",
+      "testcases": {
+        "run": [
+          {
+            "name": "01-store-list",
+            "rows": 12,
+            "detail": "20,000 input rows; 40 POS completed stores (100–139); write 100–111"
+          }
+        ],
+        "submit": [
+          {
+            "name": "02-store-list",
+            "rows": 12,
+            "detail": "100,000 input rows; 60 POS completed stores (400–459); write 400–411 — not the Run list"
+          }
+        ]
+      },
+      "datasets": [
+        {
+          "name": "Overnight sales",
+          "env": "INPUT_PATH",
+          "kind": "fact",
+          "schema": [
+            {
+              "column": "txn_id",
+              "type": "STRING"
+            },
+            {
+              "column": "store_id",
+              "type": "INT"
+            },
+            {
+              "column": "register_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_code",
+              "type": "STRING"
+            },
+            {
+              "column": "customer_id",
+              "type": "INT"
+            },
+            {
+              "column": "quantity",
+              "type": "INT"
+            },
+            {
+              "column": "unit_price",
+              "type": "DECIMAL(10,2)"
+            },
+            {
+              "column": "discount_pct",
+              "type": "DECIMAL(5,2)"
+            },
+            {
+              "column": "currency",
+              "type": "STRING"
+            },
+            {
+              "column": "status",
+              "type": "STRING"
+            },
+            {
+              "column": "channel",
+              "type": "STRING"
+            },
+            {
+              "column": "payment_method",
+              "type": "STRING"
+            },
+            {
+              "column": "country_code",
+              "type": "STRING"
+            },
+            {
+              "column": "event_ts",
+              "type": "TIMESTAMP"
+            }
+          ]
+        }
+      ]
+    },
+    "inputSchema": [
+      {
+        "column": "txn_id",
+        "type": "STRING"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "register_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_code",
+        "type": "STRING"
+      },
+      {
+        "column": "customer_id",
+        "type": "INT"
+      },
+      {
+        "column": "quantity",
+        "type": "INT"
+      },
+      {
+        "column": "unit_price",
+        "type": "DECIMAL(10,2)"
+      },
+      {
+        "column": "discount_pct",
+        "type": "DECIMAL(5,2)"
+      },
+      {
+        "column": "currency",
+        "type": "STRING"
+      },
+      {
+        "column": "status",
+        "type": "STRING"
+      },
+      {
+        "column": "channel",
+        "type": "STRING"
+      },
+      {
+        "column": "payment_method",
+        "type": "STRING"
+      },
+      {
+        "column": "country_code",
+        "type": "STRING"
+      },
+      {
+        "column": "event_ts",
+        "type": "TIMESTAMP"
+      }
+    ],
+    "expectedOutput": [
+      {
+        "column": "store_id",
+        "description": "The 12 smallest unique store ids that have at least one POS completed ticket, sorted ascending"
+      }
+    ],
+    "moat": "Setter notes — not shown to learners.\n\n## What was in mind\n\nLab 4 of the **Vesper** overnight-sales sequence. Same 15-column fact. This lab teaches `distinct` (whole-row unique, wide) plus a replayable `limit`.\n\nThey must filter POS + COMPLETED, **project `store_id`**, `distinct()`, `orderBy(\"store_id\")`, `limit(12)`. Output is one column, twelve rows.\n\nThe learner brief lists those constraints as rules, not a recipe. Intended order is filter → select → distinct → orderBy → limit.\n\n| Step | Transform | Kind |\n| --- | --- | --- |\n| `channel` | `filter` `== \"POS\"` | narrow |\n| `status` | `filter` `== \"COMPLETED\"` | narrow |\n| grain | `select(\"store_id\")` | narrow — this is the distinct lesson |\n| unique | `distinct()` | wide — shuffle |\n| take | `orderBy(\"store_id\").limit(12)` | sort + take |\n\n`12` is in the brief. Do not hunt Audit envelopes. Run and Submit use **different store universes** so hard-coding 1–12 or 100–111 fails Submit.\n\n`distinct()` without the project writes unique 15-column tickets. `dropDuplicates([\"store_id\"])` writes one full ticket per store — wrong shape (lab 2 muscle memory). `limit(12)` before unique is 12 tickets, not the 12 smallest floor stores. `distinct()` on the lake includes decoy store ids that only appear as web / cancelled — those ids are **smaller** than the floor min, so ordered `limit(12)` is the decoys.\n\nThe question we wanted a failed Submit to answer: **did you unique POS completed store ids, sort, take 12? Or unique the lake / take 12 tickets / hard-code last night's list?**\n\n## Why performance is off\n\nThis lab is functional. `distinct` still shuffles (AQE off so the Exchange stays visible). Time does not fail the grade. No pace bands.\n\n## How we created the cases\n\nEvery floor store id is planted as POS + COMPLETED at least twice. Decoy store ids are smaller than the floor min and only appear as `web`/`app` or POS `CANCELLED`/`PENDING`. Inputs are 4 Parquet parts. `DATA_SEED=42`. `LIMIT=12`.\n\n1. **`01-store-list` (20k, Run)** — floor stores 100–139. Golden **100–111**. Lake-then-limit is **1–12**.\n2. **`02-store-list` (100k, Submit)** — floor stores 400–459. Golden **400–411**. Lake-then-limit is **200–211**.\n\nA job that `distinct()`s the whole file then sorts and takes 12 writes the decoys. A job that `limit(12)` first writes whoever shuffled to the front. A job that `dropDuplicates([\"store_id\"])` keeps 15 columns.\n\nOracle is `solution/solve.py` (same 12 store ids as `solution/src/main.py`). Grade is a row-diff on `store_id`.\n\n## Testcase distribution\n\nTwo overnight files. Floor tickets are POS + COMPLETED. Decoy store ids never have a POS completed ticket. `DATA_SEED=42`. `LIMIT=12`.\n\n| | Run `01-store-list` | Submit `02-store-list` |\n| --- | --- | --- |\n| Input rows | 20,000 | 100,000 |\n| POS completed tickets | 16,390 | 81,960 |\n| not POS (`web`/`app`) | 1,981 | 9,989 |\n| POS not completed | 1,629 | 8,051 |\n| Floor store ids | 40 (100–139) | 60 (400–459) |\n| Decoy store ids | 30 (1–30) | 51 (200–250) |\n| Lake-wide unique stores | 70 | 111 |\n| Golden (12 smallest floor) | **100–111** | **400–411** |\n| Trap: lake then `limit(12)` | 1–12 | 200–211 |\n\nGoldens are written by `solution/solve.py` (unique POS completed `store_id`, sort, 12). Same answer as Spark `distinct` + `orderBy` + `limit`.\n"
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-distinct-store-list/testcases/",
+    "runCases": [
+      "01-store-list"
+    ],
+    "submitCases": [
+      "02-store-list"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-distinct-store-list/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-distinct-store-list/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "store_id"
+    ],
+    "gradeScript": "s3a://devlabs-data/challenges/l1-distinct-store-list/grade/grade.py",
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g",
+      "aqe": false,
+      "shufflePartitions": 8,
+      "hardTimeoutSeconds": 120
+    },
+    "sparkConf": {
+      "spark.sql.adaptive.enabled": "false",
+      "spark.sql.shuffle.partitions": "8"
+    },
+    "gradeChecks": [
+      "Functional: candidate Parquet is 12 store_id values — unique POS completed stores, sorted ascending, first 12",
+      "Performance: not specified for this lab"
+    ]
+  }
+}

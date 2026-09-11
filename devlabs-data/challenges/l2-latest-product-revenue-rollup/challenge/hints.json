@@ -1,6 +1,0 @@
-[
-  "Window.partitionBy(\"product_id\").orderBy(col(\"effective_ts\").desc(), col(\"product_name\").asc())",
-  "Inner join \u2014 sales without a catalog row are dropped",
-  "ROUND(quantity * unit_price * (1 - discount_pct), 2) per line before SUM",
-  "groupBy(\"category\").agg(sum(line_revenue), count(*))"
-]

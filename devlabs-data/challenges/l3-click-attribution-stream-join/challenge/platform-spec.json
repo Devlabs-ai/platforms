@@ -1,0 +1,58 @@
+{
+  "contentSource": "minio",
+  "streaming": true,
+  "dualInput": true,
+  "inputALabel": "Impressions",
+  "inputBLabel": "Purchases",
+  "eventsInputPath": "s3a://devlabs-data/challenges/l3-click-attribution-stream-join/submit/impressions/",
+  "catalogInputPath": "s3a://devlabs-data/challenges/l3-click-attribution-stream-join/submit/purchases/",
+  "runEventsInputPath": "s3a://devlabs-data/challenges/l3-click-attribution-stream-join/run/impressions/",
+  "runCatalogInputPath": "s3a://devlabs-data/challenges/l3-click-attribution-stream-join/run/purchases/",
+  "runEvalPath": "s3a://devlabs-data/challenges/l3-click-attribution-stream-join/run/expected/",
+  "evalSolutionPath": "s3a://devlabs-data/challenges/l3-click-attribution-stream-join/expected/",
+  "outputFormat": "parquet",
+  "gradeKeys": [
+    "impression_id",
+    "purchase_id"
+  ],
+  "language": "python",
+  "starterFileName": "src/main.py",
+  "limits": {
+    "driver": 1,
+    "driverMemory": "1g",
+    "executors": 2,
+    "executorCores": 1,
+    "executorMemory": "512m",
+    "hardTimeoutSeconds": 240
+  },
+  "sparkConf": {
+    "spark.sql.adaptive.enabled": "false",
+    "spark.sql.shuffle.partitions": "16"
+  },
+  "gradeChecks": [
+    "Spark Structured Streaming job succeeds and drains (availableNow) within 4 min",
+    "OUTPUT_PATH is Parquet with one row per in-scope impression–purchase pair",
+    "Late events behind the 2-minute watermark are omitted; batch join of the two directories fails Submit"
+  ],
+  "scoring": {
+    "executionTime": {
+      "bands": [
+        {
+          "maxSeconds": 120,
+          "label": "Below 2 min",
+          "tone": "quick"
+        },
+        {
+          "maxSeconds": 180,
+          "label": "Below 3 min",
+          "tone": "brisk"
+        },
+        {
+          "maxSeconds": 240,
+          "label": "Below 4 min",
+          "tone": "steady"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: l1-store-payment-profile-datagen
+  namespace: devlabs-data
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: generator
+          image: devlabs-data-builder:latest
+          imagePullPolicy: Never
+          command:
+            - python3
+            - /work/challenges/l1-store-payment-profile/generate.py
+          env:
+            - name: MINIO_ENDPOINT
+              value: "http://minio.minio.svc.cluster.local:9000"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: accessKey
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secretKey
+            - name: MINIO_BUCKET
+              value: "devlabs-data"
+            - name: DATA_S3_PREFIX
+              value: "challenges/l1-store-payment-profile"
+            - name: DATA_SEED
+              value: "42"
+          volumeMounts:
+            - name: workspace
+              mountPath: /work
+      volumes:
+        - name: workspace
+          hostPath:
+            path: /Users/rithvik/Documents/devlabs-ai/platforms/devlabs-data
+            type: Directory

@@ -37,6 +37,15 @@ colima start --cpu 4 --memory 8 --kubernetes
 Build on your **MacBook** → push to Docker Hub → cluster pulls the image
 (same pattern as `devlabs-data`; avoids Docker Desktop vs Colima image mismatch).
 
+`deploy.sh` builds two images:
+
+| Image | Platform | Purpose |
+|-------|----------|---------|
+| `rithvikreddyalkanti/spark-platform-api` | `linux/arm64` | Job portal API |
+| `rithvikreddyalkanti/spark:3.5.3-s3a` | `linux/arm64` | Driver/executor runtime with Hadoop-AWS jars baked in |
+
+Python jobs no longer resolve `spark.jars.packages` via Ivy on every submit. MinIO `fs.s3a.*` settings are still injected as Spark/Hadoop conf.
+
 ```bash
 docker login
 chmod +x scripts/deploy.sh
@@ -45,10 +54,10 @@ chmod +x scripts/deploy.sh
 export KUBECONFIG=~/.kube/mac-mini.yaml
 # keep tunnel open: ssh -N devlabs-mini
 
-MAC_MINI_IP=192.168.1.9 ./scripts/deploy.sh
+MAC_MINI_IP=192.168.1.2 ./scripts/deploy.sh
 
 # optional pin:
-# SPARK_PLATFORM_API_IMAGE_TAG=2026-07-14 MAC_MINI_IP=192.168.1.9 ./scripts/deploy.sh
+# SPARK_PLATFORM_API_IMAGE_TAG=2026-07-14 MAC_MINI_IP=192.168.1.2 ./scripts/deploy.sh
 ```
 
 Defaults:
@@ -58,20 +67,25 @@ Defaults:
 | `SPARK_PLATFORM_API_IMAGE_REPO` | `rithvikreddyalkanti/spark-platform-api` |
 | `SPARK_PLATFORM_API_IMAGE_TAG` | `latest` |
 | `SPARK_PLATFORM_API_PLATFORM` | `linux/arm64` |
-| `MAC_MINI_IP` | `192.168.1.9` |
+| `SPARK_S3A_IMAGE_REPO` | `rithvikreddyalkanti/spark` |
+| `SPARK_S3A_IMAGE_TAG` | `3.5.3-s3a` |
+| `SPARK_S3A_PLATFORM` | `linux/arm64` |
+| `MAC_MINI_IP` | `192.168.1.2` |
 
-Skip build/push if the image is already on Hub and you only need to re-apply manifests:
+Skip build/push if the images are already on Hub and you only need to re-apply manifests:
 
 ```bash
 SPARK_PLATFORM_API_SKIP_BUILD=1 SPARK_PLATFORM_API_SKIP_PUSH=1 \
-  MAC_MINI_IP=192.168.1.9 ./scripts/deploy.sh
+  MAC_MINI_IP=192.168.1.2 ./scripts/deploy.sh
 ```
+
+`SPARK_PLATFORM_API_SKIP_BUILD` / `SKIP_PUSH` also skip the Spark S3A image unless you override `SPARK_S3A_SKIP_BUILD` / `SPARK_S3A_SKIP_PUSH`.
 
 ## Usage
 
 ### Web UI
 
-Open **http://192.168.1.9:30088** — submit a Pi job, watch status, view driver logs.
+Open **http://192.168.1.2:30088** — submit a Pi job, watch status, view driver logs.
 
 ### REST API
 
@@ -92,7 +106,7 @@ A background **job watcher** (every 5s) kills managed SparkApplications whose Sp
 Example submit:
 
 ```bash
-curl -s -X POST http://192.168.1.9:30088/api/jobs \
+curl -s -X POST http://192.168.1.2:30088/api/jobs \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "pi-curl",
@@ -105,7 +119,7 @@ curl -s -X POST http://192.168.1.9:30088/api/jobs \
 
 ### History Server
 
-Completed jobs with event logging appear at **http://192.168.1.9:30080**.
+Completed jobs with event logging appear at **http://192.168.1.2:30080**.
 
 ## Resource notes (16 GB Mac Mini)
 
@@ -120,4 +134,6 @@ Completed jobs with event logging appear at **http://192.168.1.9:30080**.
 | Job stuck with empty status | Operator not watching `spark` namespace — set `spark.jobNamespaces={spark}` |
 | FAILED: serviceaccount spark not found | `spark.serviceAccount.name=spark` on Helm chart |
 | API pod ImagePullBackOff | Re-run `./scripts/deploy.sh` ( Hub image ); check `docker login` / pull secrets |
+| Driver logs show Ivy/Maven download | Runtime image is still stock `apache/spark` — rebuild/push `spark:3.5.3-s3a` and restart the API |
+| Driver `ErrImagePull` / no matching manifest for linux/arm64 | Image was built amd64-only — rebuild with `--platform linux/arm64` and push |
 | History Server empty | Jobs must use `spark.eventLog.dir` on the shared PVC (API does this automatically) |

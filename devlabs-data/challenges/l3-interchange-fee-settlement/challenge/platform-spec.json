@@ -1,6 +1,6 @@
 {
   "contentSource": "minio",
-  "txnInputPath": "s3a://devlabs-data/datasets/payment-network/txns/100m-skew-key75/",
+  "txnInputPath": "s3a://devlabs-data/datasets/payment-network/txns/150m-skew-key75/",
   "rateInputPath": "s3a://devlabs-data/datasets/payment-network/dims/interchange_rate/",
   "runTxnInputPath": "s3a://devlabs-data/challenges/l3-interchange-fee-settlement/run/txns/",
   "runRateInputPath": "s3a://devlabs-data/challenges/l3-interchange-fee-settlement/run/rates/",
@@ -19,61 +19,39 @@
     "executors": 2,
     "executorCores": 1,
     "executorMemory": "512m",
-      "hardTimeoutSeconds": 150
+    "hardTimeoutSeconds": 240
   },
   "gradeChecks": [
-    "Spark job succeeds on the shared 100M drop",
+    "Spark job succeeds on the shared 150M drop",
     "OUTPUT_PATH is a CSV directory with a header",
     "grade/grade.py compares candidate CSV to the reference settlement summary"
   ],
   "sparkConf": {
     "spark.sql.adaptive.enabled": "false",
+    "spark.sql.autoBroadcastJoinThreshold": "-1",
     "spark.task.maxFailures": "3",
-    "spark.yarn.maxAppAttempts": "1"
+    "spark.yarn.maxAppAttempts": "1",
+    "spark.sql.shuffle.partitions": "16"
   },
   "scoring": {
     "executionTime": {
       "bands": [
-        { "maxSeconds": 90, "label": "Quick", "tone": "quick" },
-        { "maxSeconds": 120, "label": "Brisk", "tone": "brisk" },
-        { "maxSeconds": 180, "label": "Steady", "tone": "steady" },
-        { "label": "Slow", "tone": "slow" }
-      ]
-    }
-  },
-  "knobs": [
-    {
-      "id": "shufflePartitions",
-      "conf": "spark.sql.shuffle.partitions",
-      "label": "Shuffle partitions",
-      "help": "Partitions used for shuffle exchanges (joins and aggregations).",
-      "default": "32",
-      "options": [
         {
-          "value": "8",
-          "label": "8"
+          "maxSeconds": 120,
+          "label": "Below 2 min",
+          "tone": "quick"
         },
         {
-          "value": "16",
-          "label": "16"
+          "maxSeconds": 180,
+          "label": "Below 3 min",
+          "tone": "brisk"
         },
         {
-          "value": "32",
-          "label": "32"
-        },
-        {
-          "value": "64",
-          "label": "64"
-        },
-        {
-          "value": "128",
-          "label": "128"
-        },
-        {
-          "value": "200",
-          "label": "200"
+          "maxSeconds": 240,
+          "label": "Below 4 min",
+          "tone": "steady"
         }
       ]
     }
-  ]
+  }
 }

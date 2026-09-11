@@ -2,24 +2,18 @@
   "contentSource": "minio",
   "testcasesPrefix": "s3a://devlabs-data/challenges/l1-derive-revenue-column/testcases/",
   "runCases": [
-    "01-smoke-basic",
-    "02-smoke-edges"
+    "01-run-edges"
   ],
   "submitCases": [
-    "03-full-mix",
-    "04-full-zero-discount",
-    "05-full-high-discount",
-    "06-full-qty-edges",
-    "07-full-price-edges",
-    "08-full-balanced",
-    "09-full-stress"
+    "02-submit-all"
   ],
   "inputPath": "s3a://devlabs-data/challenges/l1-derive-revenue-column/testcases/",
   "evalSolutionPath": "s3a://devlabs-data/challenges/l1-derive-revenue-column/testcases/",
   "outputFormat": "parquet",
   "gradeKeys": [
-    "transaction_id"
+    "txn_id"
   ],
+  "gradeScript": "s3a://devlabs-data/challenges/l1-derive-revenue-column/grade/grade.py",
   "language": "python",
   "starterFileName": "src/main.py",
   "limits": {
@@ -27,12 +21,24 @@
     "driverMemory": "1g",
     "executors": 2,
     "executorCores": 1,
-    "executorMemory": "1g"
+    "executorMemory": "1g",
+    "aqe": false
+  },
+  "sparkConf": {
+    "spark.sql.adaptive.enabled": "false"
+  },
+  "scoring": {
+    "executionTime": {
+      "targetSeconds": 45,
+      "bands": [
+        { "maxSeconds": 15, "label": "quick", "tone": "quick" },
+        { "maxSeconds": 45, "label": "steady", "tone": "steady" },
+        { "label": "slow", "tone": "slow" }
+      ]
+    }
   },
   "gradeChecks": [
-    "Spark job succeeds on selected Submit testcases",
-    "OUTPUT_PATH Parquet readable with input columns plus revenue",
-    "Each Submit testcase expected/ matches candidate rows (key + values)",
-    "No extra rows beyond the union of selected expected testcases"
+    "Functional: candidate Parquet matches expected on txn_id (POS only, trimmed id, one row per ticket)",
+    "Performance: shuffle from dropDuplicates is visible; pace is labeled from History and does not fail the lab"
   ]
 }

@@ -16,7 +16,7 @@ import time
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-TXN_INPUT_PATH = "s3a://devlabs-data/datasets/payment-network/txns/100m-skew-key75/"
+TXN_INPUT_PATH = "s3a://devlabs-data/datasets/payment-network/txns/150m-skew-key75/"
 RATE_INPUT_PATH = "s3a://devlabs-data/datasets/payment-network/dims/interchange_rate/"
 OUTPUT_PATH = os.environ["OUTPUT_PATH"]
 

@@ -2,7 +2,7 @@
   "submissionId": "frozen-acme-sorted-export-oom-v1",
   "appName": "acme-sorted-export-oom-v1",
   "historyAppId": "spark-93fa391ff9c14e1e9141da757717f8d0",
-  "historyUrl": "http://192.168.1.9:30080/history/spark-93fa391ff9c14e1e9141da757717f8d0",
+  "historyUrl": "http://192.168.1.2:30080/history/spark-93fa391ff9c14e1e9141da757717f8d0",
   "expectFailure": true,
   "finalStatus": "failed",
   "run": {

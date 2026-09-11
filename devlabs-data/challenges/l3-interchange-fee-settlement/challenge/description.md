@@ -12,7 +12,9 @@ interchange_fee = round(amount * rate_bps / 10000 + fixed_fee, 2)
 
 Approved payments with no matching rate are out of scope. Helix cannot publish a fee without a rate.
 
-**Run** uses a 20,000-row sample and a pruned rate card so you can check the CSV quickly. **Submit** uses the shared 100 million payment drop.
+**Fact table.** The txn files contain transactions for the **first six months of 2024** only.
+
+**Rate card.** It is unclear how completely or how far back the interchange rate schedule is maintained — use the version whose `effective_from` / `effective_to` window contains each payment date.
 
 The output is one row per `(country_code, entry_mode)`:
 

@@ -1,6 +1,0 @@
-[
-  "BUSINESS_DATE is injected as an env string (YYYY-MM-DD).",
-  "F.to_date(F.col(\"event_ts\")) == F.to_date(F.lit(BUSINESS_DATE))",
-  "df.write.mode(\"overwrite\").partitionBy(\"business_date\").parquet(OUTPUT_PATH)",
-  "Overwrite + partitionBy makes re-runs for that date idempotent for consumers reading the partition path."
-]

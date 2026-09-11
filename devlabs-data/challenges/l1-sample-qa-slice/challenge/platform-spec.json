@@ -1,0 +1,39 @@
+{
+  "contentSource": "minio",
+  "testcasesPrefix": "s3a://devlabs-data/challenges/l1-sample-qa-slice/testcases/",
+  "runCases": [
+    "01-qa-slice"
+  ],
+  "submitCases": [
+    "02-qa-slice"
+  ],
+  "inputPath": "s3a://devlabs-data/challenges/l1-sample-qa-slice/testcases/",
+  "evalSolutionPath": "s3a://devlabs-data/challenges/l1-sample-qa-slice/testcases/",
+  "outputFormat": "parquet",
+  "gradeKeys": [
+    "txn_id"
+  ],
+  "gradeScript": "s3a://devlabs-data/challenges/l1-sample-qa-slice/grade/grade.py",
+  "language": "python",
+  "starterFileName": "src/main.py",
+  "limits": {
+    "driver": 1,
+    "driverMemory": "1g",
+    "executors": 2,
+    "executorCores": 1,
+    "executorMemory": "1g",
+    "aqe": false,
+    "shufflePartitions": 8,
+    "hardTimeoutSeconds": 120
+  },
+  "sparkConf": {
+    "spark.sql.adaptive.enabled": "false",
+    "spark.sql.shuffle.partitions": "8",
+    "spark.sql.files.maxPartitionBytes": "134217728",
+    "spark.sql.files.minPartitionNum": "1"
+  },
+  "gradeChecks": [
+    "Functional: candidate Parquet matches expected on txn_id (POS + COMPLETED slice; Audit envelopes used only for the seed)",
+    "Performance: not specified for this lab"
+  ]
+}

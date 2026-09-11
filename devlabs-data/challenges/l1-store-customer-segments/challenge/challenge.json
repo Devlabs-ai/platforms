@@ -1,0 +1,240 @@
+{
+  "id": "l1-store-customer-segments",
+  "number": 8,
+  "title": "The Patterns That Emerged",
+  "contentSource": "minio",
+  "description": "# The Patterns That Emerged\n\n> **Who is asking**\n>\n> **Analytics** is Vesper's data insights team. They build dashboards, customer segments, and operational reports. They are not Finance (treasury), District (store ops), or Science (data science). Analytics is not a column.\n\nVesper still drops one overnight Parquet file. Analytics refreshes customer dashboards **every 10 minutes** for real-time visibility. The problem: exact `countDistinct` on 100 million rows takes **5 minutes**. Approximate takes **45 seconds**.\n\nFor dashboards that refresh every 10 minutes, a 5-minute query blocks the pipeline. The 45-second approximate version fits comfortably in the refresh window.\n\nFor customer segmentation, 5% error is acceptable. Speed matters more than exact precision.\n\nAnalytics wants **one row per store** showing:\n- Approximate unique customers (within 5% error)\n- Customer spending distribution (25th, 50th, 75th percentile)\n- Total transaction count\n\nThey'll use this to identify high-value stores, understand spending patterns, and allocate marketing budget.\n\nKeep only completed transactions across POS and online channels. Calculate revenue: `round(quantity * unit_price * (1 - discount_pct), 2)` per line.\n\nRead from `INPUT_PATH`. Write to `OUTPUT_PATH`.\n\nUse Spark DataFrame with **approximate aggregations**: `approx_count_distinct` and `percentile_approx`.\n\n## Rules\n\nThese must all be true for your output:\n\n- **Floor.** Keep only `channel IN ('POS', 'ONLINE')` and `status = 'COMPLETED'` transactions.\n- **Revenue calculation.** `round(qty * price * (1 - discount_pct), 2)` per line.\n- **Group by store.** One output row per `store_id`.\n- **`approx_unique_customers`.** Use `approx_count_distinct(\"customer_id\", rsd=0.05)` for approximate unique customers (`LONG`). The `rsd` parameter controls accuracy \u2014 0.05 means ~5% relative error.\n- **`revenue_p25`, `revenue_p50`, `revenue_p75`.** Use `percentile_approx(\"line_revenue\", [0.25, 0.5, 0.75])` to get 25th, 50th, 75th percentiles as `DECIMAL(10,2)` in a **single** aggregation call.\n- **`total_transactions`.** Exact count of transactions (`LONG`). Use `count(\"*\")`.\n- **Columns.** Write `store_id`, `approx_unique_customers`, `revenue_p25`, `revenue_p50`, `revenue_p75`, `total_transactions`.\n\n`approx_count_distinct` is **much faster** than exact `countDistinct` on large datasets. The `rsd` parameter trades accuracy for speed \u2014 smaller rsd = more accuracy but slower.\n\n`percentile_approx` returns an array when given multiple percentiles \u2014 you'll need to extract the elements with `[0]`, `[1]`, `[2]`.\n\n> **What you write**\n>\n> One row per store with approximate customer counts and spending percentiles. Run and Submit are different nights \u2014 do not hard-code the example values.\n\n## Example\n\nToy file (shown columns only). All rows are already POS/ONLINE + COMPLETED.\n\n| txn_id | store_id | channel | customer_id | quantity | unit_price | discount_pct |\n| --- | --- | --- | --- | --- | --- | --- |\n| t1 | 5 | POS | 101 | 2 | 10.00 | 0.00 |\n| t2 | 5 | ONLINE | 101 | 1 | 50.00 | 0.10 |\n| t3 | 5 | POS | 102 | 1 | 10.00 | 0.00 |\n| t4 | 5 | ONLINE | 103 | 3 | 30.00 | 0.00 |\n| t5 | 9 | POS | 201 | 1 | 100.00 | 0.00 |\n| t6 | 9 | ONLINE | 201 | 2 | 10.00 | 0.00 |\n\n**Line revenue:**\n- t1: 2 * 10.00 * 1.00 = 20.00\n- t2: 1 * 50.00 * 0.90 = 45.00\n- t3: 1 * 10.00 * 1.00 = 10.00\n- t4: 3 * 30.00 * 1.00 = 90.00\n- t5: 1 * 100.00 * 1.00 = 100.00\n- t6: 2 * 10.00 * 1.00 = 20.00\n\n**Store 5 revenues**: [20.00, 45.00, 10.00, 90.00] sorted = [10.00, 20.00, 45.00, 90.00]\n- p25 (25th percentile): 10.00\n- p50 (median): 32.50 (average of 20.00 and 45.00)\n- p75 (75th percentile): 45.00\n\n**Store 9 revenues**: [100.00, 20.00] sorted = [20.00, 100.00]\n- p25: 20.00\n- p50: 60.00\n- p75: 100.00\n\n**Output**\n\n| store_id | approx_unique_customers | revenue_p25 | revenue_p50 | revenue_p75 | total_transactions |\n| --- | --- | --- | --- | --- | --- |\n| 5 | 3 | 10.00 | 32.50 | 45.00 | 4 |\n| 9 | 2 | 20.00 | 60.00 | 100.00 | 2 |\n\nExplanation:\n- Store 5: ~3 unique customers (101, 102, 103) across POS and online, spending quartiles show most transactions under $45\n- Store 9: ~2 unique customers (201 appears twice but counts once), higher spending median\n- Approximate count matches exact in this small example, but differs slightly on large datasets\n\nAnalytics interpretation:\n- **Store 5**: Broader omnichannel customer base, moderate spending (p50=$32.50)\n- **Store 9**: Fewer customers, higher spending (p50=$60.00) \u2014 VIP segment\n\nCommon mistakes:\n- Using exact `countDistinct` instead of `approx_count_distinct`\n- Forgetting the `rsd=0.05` parameter\n- Calling `percentile_approx` three times instead of passing array `[0.25, 0.5, 0.75]`\n- Not extracting array elements: `percentile_approx` returns an array, need `[0]`, `[1]`, `[2]`\n- Wrong floor: forgetting to include ONLINE channel\n- Calculating percentiles on wrong column (should be line_revenue, not unit_price)\n\n## What these functions do\n\n```python\n# Calculate line revenue first\nwith_revenue = df.withColumn(\n    \"line_revenue\",\n    F.round(F.col(\"quantity\") * F.col(\"unit_price\") * (F.lit(1) - F.col(\"discount_pct\")), 2)\n)\n\n# Aggregate with approximate functions\naggregated = with_revenue.groupBy(\"store_id\").agg(\n    F.approx_count_distinct(\"customer_id\", rsd=0.05).alias(\"approx_unique_customers\"),\n    F.percentile_approx(\"line_revenue\", [0.25, 0.5, 0.75]).alias(\"revenue_percentiles\"),\n    F.count(\"*\").alias(\"total_transactions\")\n)\n\n# Extract array elements\nresult = aggregated.select(\n    \"store_id\",\n    \"approx_unique_customers\",\n    F.col(\"revenue_percentiles\")[0].cast(\"decimal(10,2)\").alias(\"revenue_p25\"),\n    F.col(\"revenue_percentiles\")[1].cast(\"decimal(10,2)\").alias(\"revenue_p50\"),\n    F.col(\"revenue_percentiles\")[2].cast(\"decimal(10,2)\").alias(\"revenue_p75\"),\n    \"total_transactions\"\n)\n```\n\n**`approx_count_distinct(col, rsd)`**:\n- HyperLogLog++ algorithm - probabilistic cardinality estimation\n- `rsd` = relative standard deviation (0.05 = 5% error)\n- **5 minutes \u2192 45 seconds** (~6.7x faster)\n- Trade accuracy for speed\n\n**`percentile_approx(col, percentiles, accuracy=10000)`**:\n- T-Digest algorithm - approximate quantiles\n- Pass array `[0.25, 0.5, 0.75]` to get all percentiles in one pass\n- Returns array - extract with `[index]`\n- Much faster than exact `percentile` on distributed data\n",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "dataframe",
+    "parquet",
+    "aggregate",
+    "approx_count_distinct",
+    "percentile_approx"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "hints": [],
+    "data": {
+      "overview": "Vesper overnight sales fact (15 columns). Multi-channel (POS+ONLINE) completed only. Calculate revenue per line, groupBy store_id with approx_count_distinct + percentile_approx.",
+      "testcases": {
+        "run": [
+          {
+            "name": "01-segments",
+            "rows": "190 stores",
+            "detail": "50,000 input rows; stores 10-199; multi-channel data"
+          }
+        ],
+        "submit": [
+          {
+            "name": "02-segments",
+            "rows": "300 stores",
+            "detail": "200,000 input rows; stores 200-499; different customer patterns than Run"
+          }
+        ]
+      },
+      "datasets": [
+        {
+          "name": "Overnight sales",
+          "env": "INPUT_PATH",
+          "kind": "fact",
+          "schema": [
+            {
+              "column": "txn_id",
+              "type": "STRING"
+            },
+            {
+              "column": "store_id",
+              "type": "INT"
+            },
+            {
+              "column": "register_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_code",
+              "type": "STRING"
+            },
+            {
+              "column": "customer_id",
+              "type": "INT"
+            },
+            {
+              "column": "quantity",
+              "type": "INT"
+            },
+            {
+              "column": "unit_price",
+              "type": "DECIMAL(10,2)"
+            },
+            {
+              "column": "discount_pct",
+              "type": "DECIMAL(5,2)"
+            },
+            {
+              "column": "currency",
+              "type": "STRING"
+            },
+            {
+              "column": "status",
+              "type": "STRING"
+            },
+            {
+              "column": "channel",
+              "type": "STRING"
+            },
+            {
+              "column": "payment_method",
+              "type": "STRING"
+            },
+            {
+              "column": "country_code",
+              "type": "STRING"
+            },
+            {
+              "column": "event_ts",
+              "type": "TIMESTAMP"
+            }
+          ]
+        }
+      ]
+    },
+    "inputSchema": [
+      {
+        "column": "txn_id",
+        "type": "STRING"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "register_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_code",
+        "type": "STRING"
+      },
+      {
+        "column": "customer_id",
+        "type": "INT"
+      },
+      {
+        "column": "quantity",
+        "type": "INT"
+      },
+      {
+        "column": "unit_price",
+        "type": "DECIMAL(10,2)"
+      },
+      {
+        "column": "discount_pct",
+        "type": "DECIMAL(5,2)"
+      },
+      {
+        "column": "currency",
+        "type": "STRING"
+      },
+      {
+        "column": "status",
+        "type": "STRING"
+      },
+      {
+        "column": "channel",
+        "type": "STRING"
+      },
+      {
+        "column": "payment_method",
+        "type": "STRING"
+      },
+      {
+        "column": "country_code",
+        "type": "STRING"
+      },
+      {
+        "column": "event_ts",
+        "type": "TIMESTAMP"
+      }
+    ],
+    "expectedOutput": [
+      {
+        "column": "store_id",
+        "description": "Store identifier"
+      },
+      {
+        "column": "approx_unique_customers",
+        "description": "Approximate distinct customer count (LONG) using HyperLogLog++"
+      },
+      {
+        "column": "revenue_p25",
+        "description": "25th percentile of line revenue (DECIMAL(10,2))"
+      },
+      {
+        "column": "revenue_p50",
+        "description": "50th percentile (median) of line revenue (DECIMAL(10,2))"
+      },
+      {
+        "column": "revenue_p75",
+        "description": "75th percentile of line revenue (DECIMAL(10,2))"
+      },
+      {
+        "column": "total_transactions",
+        "description": "Exact count of transactions (LONG)"
+      }
+    ],
+    "moat": "Lab 8 of the Vesper overnight-sales sequence. Teaches approximate aggregations for performance. Filter POS+ONLINE + COMPLETED \u2192 calculate revenue per line \u2192 groupBy store_id with approx_count_distinct(rsd=0.05) + percentile_approx([0.25, 0.5, 0.75]).\n\n## DATA SEED PUZZLE\n\nStudents discover the DATA_SEED by running:\n```python\n# After floor filter\nstore_metrics = df.groupBy('store_id').agg(\n    F.approx_count_distinct('customer_id', rsd=0.05).alias('customers')\n)\nhigh_traffic = store_metrics.filter(F.col('customers') >= 100)\nseed = high_traffic.count()  # This is the DATA_SEED\n```\n\n**Clue**: *How many stores serve at least 100 unique customers? Count them \u2014 that number unlocks reproducibility.*\n\nExpected discovery: 157 stores have >= 100 customers."
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-store-customer-segments/testcases/",
+    "runCases": [
+      "01-segments"
+    ],
+    "submitCases": [
+      "02-segments"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-store-customer-segments/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-store-customer-segments/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "store_id"
+    ],
+    "gradeScript": "s3a://devlabs-data/challenges/l1-store-customer-segments/grade/grade.py",
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g",
+      "aqe": false,
+      "shufflePartitions": 8,
+      "hardTimeoutSeconds": 120
+    },
+    "sparkConf": {
+      "spark.sql.adaptive.enabled": "false",
+      "spark.sql.shuffle.partitions": "8"
+    },
+    "gradeChecks": [
+      "Functional: candidate Parquet has correct approximate customer counts and percentiles per store",
+      "Performance: not specified for this lab"
+    ]
+  }
+}

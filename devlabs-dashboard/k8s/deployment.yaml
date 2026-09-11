@@ -26,7 +26,7 @@ spec:
               containerPort: 8080
           env:
             - name: MAC_MINI_IP
-              value: "192.168.1.9"
+              value: "192.168.1.2"
             - name: COLIMA_CPU
               value: "8"
             - name: COLIMA_MEMORY_GIB

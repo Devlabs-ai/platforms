@@ -1,5 +1,0 @@
-[
-  "Filter first \u2014 do not repair invalid values.",
-  "Reuse the discounted revenue formula from Derive / Aggregate labs.",
-  "groupBy(\"product_id\").agg(sum, count)"
-]

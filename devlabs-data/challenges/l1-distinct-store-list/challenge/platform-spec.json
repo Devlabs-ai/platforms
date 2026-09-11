@@ -1,0 +1,37 @@
+{
+  "contentSource": "minio",
+  "testcasesPrefix": "s3a://devlabs-data/challenges/l1-distinct-store-list/testcases/",
+  "runCases": [
+    "01-store-list"
+  ],
+  "submitCases": [
+    "02-store-list"
+  ],
+  "inputPath": "s3a://devlabs-data/challenges/l1-distinct-store-list/testcases/",
+  "evalSolutionPath": "s3a://devlabs-data/challenges/l1-distinct-store-list/testcases/",
+  "outputFormat": "parquet",
+  "gradeKeys": [
+    "store_id"
+  ],
+  "gradeScript": "s3a://devlabs-data/challenges/l1-distinct-store-list/grade/grade.py",
+  "language": "python",
+  "starterFileName": "src/main.py",
+  "limits": {
+    "driver": 1,
+    "driverMemory": "1g",
+    "executors": 2,
+    "executorCores": 1,
+    "executorMemory": "1g",
+    "aqe": false,
+    "shufflePartitions": 8,
+    "hardTimeoutSeconds": 120
+  },
+  "sparkConf": {
+    "spark.sql.adaptive.enabled": "false",
+    "spark.sql.shuffle.partitions": "8"
+  },
+  "gradeChecks": [
+    "Functional: candidate Parquet is 12 store_id values — unique POS completed stores, sorted ascending, first 12",
+    "Performance: not specified for this lab"
+  ]
+}

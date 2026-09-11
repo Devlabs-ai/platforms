@@ -3,11 +3,11 @@
   "number": 18,
   "title": "Interchange Fee Settlement Summary",
   "contentSource": "minio",
-  "description": "Helix Payments is a payment network. One of their products is an interchange fee summary of all the merchants in a country and mode of card transaction.\n\nInterchange is the fee on an approved card payment. The rate depends on merchant category (`mcc`), country (`country_code`), and how the card was presented (`entry_mode` \u2014 chip, swipe, or contactless). Each rate is valid only between `effective_from` and `effective_to`.\n\nOnly approved payments (`response_code == \"00\"`) are in scope. Each of those payments must be priced with the rate that matches `(mcc, country_code, entry_mode)` and whose window contains the payment date:\n\n```\ninterchange_fee = round(amount * rate_bps / 10000 + fixed_fee, 2)\n```\n\nApproved payments with no matching rate are out of scope. Helix cannot publish a fee without a rate.\n\n**Run** uses a 20,000-row sample and a pruned rate card so you can check the CSV quickly. **Submit** uses the shared 100 million payment drop.\n\nThe output is one row per `(country_code, entry_mode)`:\n\n| Column | Meaning |\n| --- | --- |\n| `txn_count` | How many payments were priced in the group |\n| `total_fee` | Sum of `interchange_fee` in the group |\n| `distinct_rate_versions_used` | How many distinct `rate_id`s were used in the group |\n",
-  "difficulty": "L2",
+  "description": "Helix Payments is a payment network. One of their products is an interchange fee summary of all the merchants in a country and mode of card transaction.\n\nInterchange is the fee on an approved card payment. The rate depends on merchant category (`mcc`), country (`country_code`), and how the card was presented (`entry_mode` \u2014 chip, swipe, or contactless). Each rate is valid only between `effective_from` and `effective_to`.\n\nOnly approved payments (`response_code == \"00\"`) are in scope. Each of those payments must be priced with the rate that matches `(mcc, country_code, entry_mode)` and whose window contains the payment date:\n\n```\ninterchange_fee = round(amount * rate_bps / 10000 + fixed_fee, 2)\n```\n\nApproved payments with no matching rate are out of scope. Helix cannot publish a fee without a rate.\n\n**Fact table.** The txn files contain transactions for the **first six months of 2024** only.\n\n**Rate card.** It is unclear how completely or how far back the interchange rate schedule is maintained \u2014 use the version whose `effective_from` / `effective_to` window contains each payment date.\n\nThe output is one row per `(country_code, entry_mode)`:\n\n| Column | Meaning |\n| --- | --- |\n| `txn_count` | How many payments were priced in the group |\n| `total_fee` | Sum of `interchange_fee` in the group |\n| `distinct_rate_versions_used` | How many distinct `rate_id`s were used in the group |\n",
+  "difficulty": "L1",
   "tags": [
     "spark",
-    "l2",
+    "l1",
     "joins",
     "skew",
     "range-join",
@@ -23,13 +23,13 @@
   "problemStatement": {
     "hints": [],
     "data": {
-      "overview": "Helix Payments publishes an interchange fee summary by country and card presentment. Two Parquet drops: 100 million card payments (~3.60 GB) and a 682,500-row interchange rate card (~11.9 MB). Price approved payments with the rate that was in effect on the payment date. Run uses a 20,000-row sample and a pruned rate card; Submit uses the full drops.",
+      "overview": "Helix Payments publishes an interchange fee summary by country and card presentment. Two Parquet drops: 150 million card payments (~5.4 GB) and a 682,500-row interchange rate card (~11.9 MB). Price approved payments with the rate that was in effect on the payment date. All Submit payments have `txn_ts` in 2024 (~180 days from 2024-01-01 through late June). The rate card carries 130 weekly versions per key from 2024-01-01 \u2014 many rows are for later weeks that no payment in this drop can match. Run uses a 20,000-row sample and a pruned rate card; Submit uses the full drops.",
       "datasets": [
         {
           "name": "Transactions",
           "env": "TXN_INPUT_PATH",
           "kind": "fact",
-          "distribution": "100 million authorization rows over roughly half a year. Approvals dominate: 88 million of 100 million. One (MCC, country, entry mode) combination \u2014 grocery in the US on chip (5411, US, chip) \u2014 is 66 million of those approvals (75%), about 909\u00d7 the next key. The other 5,250 keys sit around a median of ~1.6k rows. Joins and aggregations that hash on that composite key send a single task the majority of the work.",
+          "distribution": "150 million authorization rows. Every `txn_ts` is in calendar year 2024, uniformly over ~180 days from 2024-01-01 (through late June) \u2014 no payments outside that window. Approvals dominate: ~132 million of 150 million. One (MCC, country, entry mode) combination \u2014 grocery in the US on chip (5411, US, chip) \u2014 is ~99 million of those approvals (75%), about 909\u00d7 the next key. The other 5,250 keys sit around a median of ~2.4k rows. Joins and aggregations that hash on that composite key send a single task the majority of the work.",
           "schema": [
             {
               "column": "txn_id",
@@ -92,15 +92,15 @@
               "type": "BOOLEAN"
             }
           ],
-          "rowCount": 50000000,
-          "sizeBytes": 1798187969,
+          "rowCount": 150000000,
+          "sizeBytes": 5394095542,
           "format": "Parquet (Snappy)"
         },
         {
           "name": "Interchange rate card",
           "env": "RATE_INPUT_PATH",
           "kind": "dim",
-          "distribution": "Weekly effective schedules per (MCC, country, entry mode) spanning a couple of years. 682,500 versioned rows \u2014 11.9 MB on disk, large enough that Spark will not auto-broadcast it at the default 10 MB threshold. Windows are adjacent weeks, not overlapping.",
+          "distribution": "Weekly effective schedules per (MCC, country, entry mode): 130 versions from 2024-01-01 onward (682,500 rows \u2014 11.9 MB on disk, large enough that Spark will not auto-broadcast at the default 10 MB threshold). Windows are adjacent weeks, not overlapping. About 59% of rows are for weeks with no overlap on calendar 2024; the Submit payment drop only spans ~180 days in early 2024, so many rate versions never match a payment in this file.",
           "schema": [
             {
               "column": "rate_id",
@@ -170,11 +170,12 @@
         "column": "distinct_rate_versions_used",
         "description": "Distinct rate_id applied in the group (BIGINT)"
       }
-    ]
+    ],
+    "moat": "# Lab 18 \u2014 setter moat (intention + data)\n\nAdmin-only. Learners do not see this tab.\n\n## Intention\n\nHelix Payments needs an **interchange fee summary** by country and card presentment. The learner must:\n\n1. Filter to **approved** auths (`response_code == \"00\"`).\n2. **Join** the 150M payment drop to the **versioned rate card** on `(mcc, country_code, entry_mode)`.\n3. Apply the **date-range** predicate: payment date must fall between `effective_from` and `effective_to`.\n4. Compute `interchange_fee = round(amount * rate_bps / 10000 + fixed_fee, 2)` and aggregate to CSV by `(country_code, entry_mode)`.\n\nThe moat is **not** \u201cwrite a join.\u201d It is **survive the skew** on Submit:\n\n- Cluster is pinned tight: **2\u00d71 core @ 512m**, **AQE off**, **auto-broadcast off**, **shuffle 16**.\n- A naive three-key join + `between` puts **~99M grocery-US-chip approvals** on **one shuffle task** and dies (OOM / failed stages).\n- The intended fix is **salting** the composite join key so the hot bucket spreads across reducers. Reference walkthrough with History screenshots is on the **Solution** tab.\n\n## Why this company / grain\n\n- Continues **Card Rails** (15-column auth fact + dims) after functional join labs.\n- Settlement grain is **priced auth \u2192 daily summary**, not row-level output \u2014 forces join + agg in one job.\n- **Range join** (weekly rate windows) prevents a dumb equi-join on three keys alone; learner must filter after join or restructure.\n\n## Data distribution (what we generated)\n\n### Transactions (`150m-skew-key75`)\n\n| Property | Value |\n|----------|------:|\n| Rows | 150,000,000 |\n| Approved (`00`) | ~132,000,000 |\n| `txn_ts` span | **2024-01-01 \u2192 ~2024-06-29** (~180 days, uniform) |\n| Hot key `(5411, US, chip)` | ~99M approvals (**~75%** of approved) |\n| Other 5,250 keys | median ~2.4k approvals each (~909\u00d7 skew vs hot key) |\n\nSkew is on the **composite join key** `(mcc, country_code, entry_mode)` \u2014 exactly what a naive hash join uses.\n\n### Interchange rate card (`dims/interchange_rate`)\n\n| Property | Value |\n|----------|------:|\n| Rows | 682,500 (= 5,250 keys \u00d7 **130 weekly versions**) |\n| Key grain | `(mcc, country_code, entry_mode, week)` via `effective_from` / `effective_to` |\n| On disk | ~11.9 MB Snappy \u2014 **below auto-broadcast threshold in bytes but not in intent**; BHJ disabled anyway |\n| Overlap calendar 2024 | ~278k rows (53 weeks \u00d7 5,250 keys) |\n| Overlap actual payment window (~180d) | ~137k rows (~26 weeks \u00d7 5,250 keys) |\n| Rows with **no** payment in the fact drop | ~59% of the card (future weekly schedules) |\n\nAdjacent Monday-aligned weeks, non-overlapping \u2014 each payment matches **at most one** rate row per key once the date predicate is applied.\n\n## Why spill does not save the naive join\n\nSpark **can** spill sort/hash buffers to disk when execution memory fills \u2014 but spill is a **relief valve**, not extra RAM. On this lab it is not enough because **one task** owns the skew.\n\n**What fails**\n\n- Naive plan: shuffle on `(mcc, country_code, entry_mode)`, join, then `between` on date.\n- Hot partition: **~99M** approved rows on `(5411, US, chip)`.\n- Residual `between` means each payment can match **~26 weekly rate rows** for that key before the filter \u2014 join output on the hot task is **orders of magnitude** larger than 99M.\n- On **512m** executors the hot task OOMs (exit 137), retries the same partition, or dies after shuffle fetch timeouts \u2014 the **64 failed tasks** pattern in History.\n\n**Spill limits (setter mental model)**\n\n| Limit | Why it matters here |\n|-------|---------------------|\n| Not all memory spills | JVM overhead, shuffle read blocks, single large allocations can OOM before spill. |\n| Spill is per-task | Skew concentrates cost on **one** of 16 tasks; others finish quickly. |\n| Disk is finite and slow | Spilling GBs \u2192 I/O bound; may hit **4 min** timeout even without OOM. |\n| Retries do not fix skew | Same key \u2192 same partition on every attempt. |\n\n### Rough spill / memory estimate (order of magnitude)\n\nThere is **no exact formula** \u2014 treat this as **Fermi math** validated against History (`Shuffle Read/Write`, `Peak Execution Memory`, spill metrics on the hot task).\n\n**Step 1 \u2014 execution memory budget (one task on 512m)**\n\n```\nusable \u2248 executorMemory \u00d7 spark.memory.fraction \u00d7 (1 \u2212 spark.memory.storageFraction)\n       \u2248 512 MB \u00d7 0.6 \u00d7 0.5 \u2248 150 MB   (defaults; actual varies by Spark version / overhead)\n```\n\nOne core \u21d2 one concurrent task per executor usually gets **most** of that \u2014 call it **~150\u2013250 MB** of headroom before aggressive spill, not 512 MB.\n\n**Step 2 \u2014 rows landing on the hot partition**\n\n```\nhot_rows \u2248 approved_rows_on_hot_key \u2248 99M\n```\n\n**Step 3 \u2014 bytes per row in shuffle (measure, do not guess)**\n\nFrom reference salted stage 3 (spread across tasks): **~1.8 GiB / 132M records \u2248 14 B/row** after filter-projection. Naive join carries **wider** rows post-join (both sides + computed columns). Planning range: **~50\u2013150 B/row** unless you measure from History.\n\n```\nshuffle_bytes \u2248 hot_rows \u00d7 bytes_per_row\n              \u2248 99M \u00d7 100 B \u2248 9 GB   (one task's shuffle read \u2014 already ~40\u00d7 executor RAM)\n```\n\n**Step 4 \u2014 join explosion multiplier (naive + `between`)**\n\nEqui-join on 3 keys only; date filter is **after** join:\n\n```\nintermediate_rows \u2248 hot_rows \u00d7 weekly_versions_for_that_key\n                  \u2248 99M \u00d7 ~26 \u2248 2.6B   (before between drops to one match each)\n```\n\nEven a conservative **\u00d75** blow-up on the hot side puts **hundreds of millions to billions** of rows through one reducer \u2014 far beyond what spill is designed for.\n\n**Step 5 \u2014 verdict**\n\nIf `shuffle_bytes` or `intermediate_rows \u00d7 bytes_per_row` is **\u226b 10\u201350\u00d7** the per-task memory budget, assume **OOM or timeout**, not \u201cspill will save it.\u201d Salting divides hot_rows by **16** (~6M each) so each task fits in memory (reference Submit **~118s**).\n\n## Cluster / grading knobs (Submit)\n\n| Knob | Value |\n|------|-------|\n| Hard timeout | **4 min** (240s) |\n| Pace | Below 2 min / Below 3 min / Below 4 min (jobs wall) |\n| BHJ | \u22121 (force shuffle join story) |\n| AQE | off |\n\n## What we expect learners to discover\n\n- **Naive** join fails or retries on Submit \u2014 History shows **failed stages** and **one task** with tens of millions of rows.\n- **Salt** on `txn_id` (or equivalent) + replicate rate rows per bucket \u2014 passes in ~2 min on reference hardware.\n- **Week-key** and **hot-key split** are valid alternates to watch; see Solution tab for comparison.\n"
   },
   "platformSpec": {
     "contentSource": "minio",
-    "txnInputPath": "s3a://devlabs-data/datasets/payment-network/txns/100m-skew-key75/",
+    "txnInputPath": "s3a://devlabs-data/datasets/payment-network/txns/150m-skew-key75/",
     "rateInputPath": "s3a://devlabs-data/datasets/payment-network/dims/interchange_rate/",
     "runTxnInputPath": "s3a://devlabs-data/challenges/l3-interchange-fee-settlement/run/txns/",
     "runRateInputPath": "s3a://devlabs-data/challenges/l3-interchange-fee-settlement/run/rates/",
@@ -193,62 +194,40 @@
       "executors": 2,
       "executorCores": 1,
       "executorMemory": "512m",
-      "hardTimeoutSeconds": 150
+      "hardTimeoutSeconds": 240
     },
     "gradeChecks": [
-      "Spark job succeeds on the shared 100M drop",
+      "Spark job succeeds on the shared 150M drop",
       "OUTPUT_PATH is a CSV directory with a header",
       "grade/grade.py compares candidate CSV to the reference settlement summary"
     ],
     "sparkConf": {
       "spark.sql.adaptive.enabled": "false",
+      "spark.sql.autoBroadcastJoinThreshold": "-1",
       "spark.task.maxFailures": "3",
-      "spark.yarn.maxAppAttempts": "1"
+      "spark.yarn.maxAppAttempts": "1",
+      "spark.sql.shuffle.partitions": "16"
     },
     "scoring": {
       "executionTime": {
         "bands": [
-          { "maxSeconds": 90, "label": "Quick", "tone": "quick" },
-          { "maxSeconds": 120, "label": "Brisk", "tone": "brisk" },
-          { "maxSeconds": 180, "label": "Steady", "tone": "steady" },
-          { "label": "Slow", "tone": "slow" }
-        ]
-      }
-    },
-    "knobs": [
-      {
-        "id": "shufflePartitions",
-        "conf": "spark.sql.shuffle.partitions",
-        "label": "Shuffle partitions",
-        "help": "Partitions used for shuffle exchanges (joins and aggregations).",
-        "default": "32",
-        "options": [
           {
-            "value": "8",
-            "label": "8"
+            "maxSeconds": 120,
+            "label": "Below 2 min",
+            "tone": "quick"
           },
           {
-            "value": "16",
-            "label": "16"
+            "maxSeconds": 180,
+            "label": "Below 3 min",
+            "tone": "brisk"
           },
           {
-            "value": "32",
-            "label": "32"
-          },
-          {
-            "value": "64",
-            "label": "64"
-          },
-          {
-            "value": "128",
-            "label": "128"
-          },
-          {
-            "value": "200",
-            "label": "200"
+            "maxSeconds": 240,
+            "label": "Below 4 min",
+            "tone": "steady"
           }
         ]
       }
-    ]
+    }
   }
 }

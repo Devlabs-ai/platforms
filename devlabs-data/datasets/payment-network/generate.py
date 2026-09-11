@@ -4,7 +4,7 @@
 Layout under s3://devlabs-data/datasets/payment-network/:
   txns/{10k,100k,1m,10m,50m,1m-skew-mcc,50m-skew-mcc,100m-skew-mcc,
         1m-skew-key60,50m-skew-key60,1m-skew-key75,50m-skew-key75,
-        100m-skew-key75}/
+        100m-skew-key75,150m-skew-key75}/
   dims/{country,mcc,currency,response_code,entry_mode,acquirer}/
 
 Usage:
@@ -16,7 +16,7 @@ Usage:
 Schemas:
   legacy (12 cols): card_token + core payment fields — default
   wide (15 cols):   card_number + merchant_country + auth_code + settled —
-                    100m* and 50m-skew-key75
+                    100m*, 150m*, and 50m-skew-key75
 
 Skewed MCC facts (*-skew-mcc):
   Hot MCC (default 5411) gets a size-specific fraction; remaining mass is split
@@ -72,12 +72,13 @@ SIZE_SPECS = {
     "1m-skew-key75": int(os.environ.get("TXN_1M_SKEW_KEY75", "1000000")),
     "50m-skew-key75": int(os.environ.get("TXN_50M_SKEW_KEY75", "50000000")),
     "100m-skew-key75": int(os.environ.get("TXN_100M_SKEW_KEY75", "100000000")),
+    "150m-skew-key75": int(os.environ.get("TXN_150M_SKEW_KEY75", "150000000")),
 }
 
 # Extra wide-schema drops beyond the 100m* default. 50m-skew-key75 shares the
 # 100m drop's shape so a plan can be shaped on half the scan and then run
 # unchanged against the full one.
-WIDE_SIZES = frozenset({"50m-skew-key75", "20k-skew-key75"})
+WIDE_SIZES = frozenset({"50m-skew-key75", "20k-skew-key75", "150m-skew-key75"})
 
 # Per-size hot-MCC fraction for *-skew-mcc (env SKEW_HOT_FRACTION overrides all).
 SIZE_MCC_HOT = {
@@ -122,7 +123,7 @@ TXN_SCHEMA_WIDE = pa.schema([
 
 
 def schema_for_size(size: str) -> pa.Schema:
-    wide = size.startswith("100m") or size in WIDE_SIZES
+    wide = size.startswith("100m") or size.startswith("150m") or size in WIDE_SIZES
     return TXN_SCHEMA_WIDE if wide else TXN_SCHEMA
 
 
@@ -610,17 +611,44 @@ def write_txns(
     mcc_p: np.ndarray | None = None,
     schema: pa.Schema = TXN_SCHEMA,
     hot_key_p: float | None = None,
+    on_part=None,
 ) -> Path:
+    """Write one or more Snappy Parquet parts.
+
+    TXN_PART_ROWS (default 0 = single file) caps rows per part so a 150M drop
+    can upload-and-unlink each part without holding ~5 GB on the generator disk.
+    """
+    part_rows = int(os.environ.get("TXN_PART_ROWS", "0"))
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / "part-00000.parquet"
     rng = np.random.default_rng(seed)
     card_pool = _synthetic_card_pool(80_000) if schema is TXN_SCHEMA_WIDE else None
     writer: pq.ParquetWriter | None = None
+    part_idx = 0
+    in_part = 0
+    path = out_dir / f"part-{part_idx:05d}.parquet"
     written = 0
     next_id = 1
+
+    def close_part() -> None:
+        nonlocal writer, path, part_idx, in_part
+        if writer is None:
+            return
+        writer.close()
+        writer = None
+        print(f"  CLOSE  {path.name} rows={in_part:,} bytes={path.stat().st_size}", flush=True)
+        if on_part is not None:
+            on_part(path)
+        part_idx += 1
+        in_part = 0
+        path = out_dir / f"part-{part_idx:05d}.parquet"
+
     try:
         while written < n_rows:
+            if part_rows > 0 and in_part >= part_rows:
+                close_part()
             n = min(CHUNK, n_rows - written)
+            if part_rows > 0:
+                n = min(n, part_rows - in_part)
             table = _build_txn_chunk(
                 next_id, n, rng, mcc_p=mcc_p, schema=schema, card_pool=card_pool,
                 hot_key_p=hot_key_p,
@@ -629,13 +657,16 @@ def write_txns(
                 writer = pq.ParquetWriter(path, schema, compression="snappy")
             writer.write_table(table)
             written += n
+            in_part += n
             next_id += n
             print(f"  txns  {written:,}/{n_rows:,}", flush=True)
     finally:
-        if writer is not None:
-            writer.close()
-    (out_dir / "_SUCCESS").write_text("")
-    return path
+        close_part()
+    success = out_dir / "_SUCCESS"
+    success.write_text("")
+    if on_part is not None:
+        on_part(success)
+    return out_dir
 
 
 def upload_dir(local_dir: Path, key_prefix: str) -> None:
@@ -650,6 +681,43 @@ def upload_dir(local_dir: Path, key_prefix: str) -> None:
         print(f"PUT  s3://{bucket}/{key} ({path.stat().st_size} bytes)")
 
 
+def upload_and_unlink(local_path: Path, key_prefix: str, local_root: Path) -> None:
+    client = _minio_client()
+    bucket = os.environ.get("MINIO_BUCKET", os.environ.get("S3_BUCKET", "devlabs-data"))
+    rel = local_path.relative_to(local_root).as_posix()
+    key = f"{key_prefix.rstrip('/')}/{rel}"
+    client.fput_object(bucket, key, str(local_path))
+    print(f"PUT  s3://{bucket}/{key} ({local_path.stat().st_size} bytes)", flush=True)
+    if local_path.name != "_SUCCESS":
+        local_path.unlink()
+
+
+def delete_prefix(key_prefix: str) -> int:
+    from minio.deleteobjects import DeleteObject
+
+    client = _minio_client()
+    bucket = os.environ.get("MINIO_BUCKET", os.environ.get("S3_BUCKET", "devlabs-data"))
+    root = key_prefix.rstrip("/") + "/"
+    names = [o.object_name for o in client.list_objects(bucket, prefix=root, recursive=True)]
+    deleted = 0
+    if names:
+        errs = list(client.remove_objects(bucket, [DeleteObject(n) for n in names]))
+        if errs:
+            raise RuntimeError(f"MinIO delete failed: {errs[0]}")
+        deleted = len(names)
+    versions = list(client.list_objects(bucket, prefix=root, recursive=True, include_version=True))
+    if versions:
+        list(client.remove_objects(bucket, [
+            DeleteObject(
+                o.object_name,
+                version_id=("null" if o.version_id in (None, "", "null") else o.version_id),
+            )
+            for o in versions
+        ]))
+    print(f"DELETE  s3://{bucket}/{root} objects={deleted}", flush=True)
+    return deleted
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upload", action="store_true")
@@ -659,7 +727,7 @@ def main() -> int:
         help=(
             "Comma list of txn sizes (10k,…,50m,1m-skew-mcc,50m-skew-mcc,"
             "100m-skew-mcc,1m-skew-key60,50m-skew-key60,1m-skew-key75,"
-            "50m-skew-key75,20k-skew-key75,100m-skew-key75)"
+            "50m-skew-key75,20k-skew-key75,100m-skew-key75,150m-skew-key75)"
         ),
     )
     parser.add_argument(
@@ -669,15 +737,25 @@ def main() -> int:
     )
     parser.add_argument("--prefix", default=DEFAULT_PREFIX)
     parser.add_argument("--skip-dims", action="store_true")
+    parser.add_argument(
+        "--delete-sizes",
+        default="",
+        help="Comma list of txn sizes to delete from MinIO before generating (e.g. 100m-skew-key75)",
+    )
     args = parser.parse_args()
 
     sizes = [s.strip() for s in args.sizes.split(",") if s.strip()]
     for s in sizes:
         if s not in SIZE_SPECS:
             raise SystemExit(f"unknown size {s!r}; choose from {list(SIZE_SPECS)}")
+    delete_sizes = [s.strip() for s in args.delete_sizes.split(",") if s.strip()]
 
     print(f"BUILD  family={FAMILY} seed={DATA_SEED} sizes={sizes}")
     args.out.mkdir(parents=True, exist_ok=True)
+
+    if delete_sizes:
+        for size in delete_sizes:
+            delete_prefix(f"{args.prefix}/txns/{size}")
 
     if not args.skip_dims:
         dims = build_dims()
@@ -686,9 +764,13 @@ def main() -> int:
             path = write_table(table, ddir)
             print(f"WRITE  dims/{name} rows={table.num_rows} → {path}")
 
+    streamed = int(os.environ.get("TXN_PART_ROWS", "0")) > 0 and args.upload
     for size in sizes:
         n = SIZE_SPECS[size]
         tdir = args.out / "txns" / size
+        if tdir.exists():
+            for stale in tdir.glob("*"):
+                stale.unlink() if stale.is_file() else None
         schema = schema_for_size(size)
         mcc_p = mcc_probs_for_size(size)
         hot_target = hot_key_target_for_size(size)
@@ -708,7 +790,13 @@ def main() -> int:
             )
         else:
             print(f"BUILD  txns/{size} rows={n:,} schema={schema_label(schema)}")
-        path = write_txns(
+        key_prefix = f"{args.prefix}/txns/{size}"
+        on_part = (
+            (lambda p, kp=key_prefix, root=tdir: upload_and_unlink(p, kp, root))
+            if streamed
+            else None
+        )
+        out = write_txns(
             n,
             tdir,
             # crc32, not hash(): str hashing is salted per process, so hash()
@@ -717,14 +805,16 @@ def main() -> int:
             mcc_p=mcc_p,
             schema=schema,
             hot_key_p=hot_key_p,
+            on_part=on_part,
         )
-        print(f"WRITE  txns/{size} → {path} ({path.stat().st_size} bytes)")
+        print(f"WRITE  txns/{size} → {out}")
 
     if args.upload:
         if not args.skip_dims:
             upload_dir(args.out / "dims", f"{args.prefix}/dims")
-        for size in sizes:
-            upload_dir(args.out / "txns" / size, f"{args.prefix}/txns/{size}")
+        if not streamed:
+            for size in sizes:
+                upload_dir(args.out / "txns" / size, f"{args.prefix}/txns/{size}")
         print(f"UPLOAD_OK  s3a://…/{args.prefix}/")
     else:
         print("NOTE  pass --upload to push to MinIO")

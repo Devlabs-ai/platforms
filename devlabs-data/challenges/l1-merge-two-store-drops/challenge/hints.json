@@ -1,5 +1,0 @@
-[
-  "east.unionByName(west)",
-  "Do not use positional union alone.",
-  "txn_ids are unique across both sides within a testcase."
-]

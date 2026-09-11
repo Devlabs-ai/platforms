@@ -1,0 +1,284 @@
+{
+  "id": "l1-sample-qa-slice",
+  "number": 3,
+  "title": "The Slice They Could Not Replay",
+  "contentSource": "minio",
+  "description": "Vesper Markets still drops one overnight Parquet file. Labs 1 and 2 already taught how that file gets cleaned and how POS tickets collapse. This morning is a different request.\n\nAudit wants a **smaller copy of this night’s floor** — about 10% of completed in-store tickets — so when the dashboard looks off they can inspect that handful instead of scrolling 100,000 rows. The job still **reads the full drop once** to build the slice. Replay means: run the **same job on the same file** and get the **same tickets**. It does **not** mean Monday’s handful shows up in Tuesday’s file. Tuesday is a new hat: new rows, new Audit envelopes, new seed, new 10%. Same code, different slice.\n\n**What went wrong last time.** The toy file below has five rows. Only **t1** is the floor (POS and completed). t2 is cancelled. t3 is web. The two `AUDIT-*` rows are envelopes, not sales.\n\nSomeone drew ~10% of **all five rows**, then deleted web and cancelled from that draw. The 10% was of the whole file, not of the one floor ticket. And they left the seed off, so the next run on the **same five rows** drew a different handful. Keep POS + completed first, then sample that floor with a seed.\n\n> **Where the seed is**\n>\n> It is not written in this brief. Rows whose `txn_id` starts with `AUDIT-` are envelopes, not sales. On **this drop**, take `max(product_id)` among those rows. That integer is the `sample` seed. Run and Submit are different overnight files, so the max can differ. Do not hard-code 42 from the toy table below.\n\nRead the drop from `INPUT_PATH`. Apply the rules below, then write Parquet to `OUTPUT_PATH`.\n\nThe file is the Vesper overnight sales fact (15 columns). Do not invent rows. Do not add or drop columns.\n\nUse Spark DataFrame APIs. Do not `collect()` the sales table and loop in Python. A one-row aggregate for the seed is fine.\n\n## Rules\n\nThese all have to be true of the file you write. They are not a recipe.\n\n- **Audit envelopes.** Rows whose `txn_id` starts with `AUDIT-` are not sales. Read them for the seed: **`max(product_id)`** among those rows. They are not part of the floor.\n- **`channel`.** The slice is in-store only. Keep the row only if channel is exactly `POS`. `web`, `app`, and `AUDIT` are out. Do not rewrite tokens.\n- **`status`.** Keep the row only if status is exactly `COMPLETED`. `CANCELLED` and `PENDING` are out.\n- **The handful.** From the rows that remain, take a random slice **without replacement**, fraction **`0.1`**, using that Audit max as the `sample` seed. The count will not be exactly 10% — that is expected. Matching the official slice is the point.\n- **Do not** `repartition`, `coalesce`, or `sort` before the slice. That changes which tickets the seed draws.\n\nAfter you finish, Audit wants **the same POS completed handful every time this job runs on this drop**. Tomorrow’s drop is a new file — hunt that night’s Audit max and sample that night’s floor.\n\nUse `sample`. Do not `limit` to a fixed headcount.\n\n## Example\n\nToy file (shown columns only). On **this toy** the Audit max is 42. Your overnight file has its own envelopes — compute the max, do not hard-code 42.\n\n**Input**\n\n| txn_id | channel | status | product_id |\n| --- | --- | --- | --- |\n| AUDIT-A | AUDIT | COMPLETED | 17 |\n| AUDIT-B | AUDIT | COMPLETED | 42 |\n| t1 | POS | COMPLETED | 200 |\n| t2 | POS | CANCELLED | 201 |\n| t3 | web | COMPLETED | 202 |\n\n**Floor** (what you sample) — only t1.\n\n**Seed** — `max(product_id)` on `AUDIT-*` is 42.\n\nThe written file is `sample(False, 0.1, seed)` of that floor. On a one-row floor the slice is either empty or t1; on the overnight drop it is thousands of POS completed tickets.\n",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "dataframe",
+    "parquet",
+    "sample"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "hints": [],
+    "data": {
+      "overview": "Vesper overnight sales fact (15 columns). Mixed channel and status, plus Audit envelopes (txn_id AUDIT-*, channel AUDIT). Floor is POS + COMPLETED. Seed is max(product_id) on the envelopes. Output is a 10% sample of the floor.",
+      "testcases": {
+        "run": [
+          {
+            "name": "01-qa-slice",
+            "rows": 1811,
+            "detail": "20,008 input rows; ~10% of 17,400 POS completed (seed hunted from AUDIT-*)"
+          }
+        ],
+        "submit": [
+          {
+            "name": "02-qa-slice",
+            "rows": 8549,
+            "detail": "100,008 input rows; ~10% of 84,000 POS completed (different Audit max than Run)"
+          }
+        ]
+      },
+      "datasets": [
+        {
+          "name": "Overnight sales",
+          "env": "INPUT_PATH",
+          "kind": "fact",
+          "schema": [
+            {
+              "column": "txn_id",
+              "type": "STRING"
+            },
+            {
+              "column": "store_id",
+              "type": "INT"
+            },
+            {
+              "column": "register_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_code",
+              "type": "STRING"
+            },
+            {
+              "column": "customer_id",
+              "type": "INT"
+            },
+            {
+              "column": "quantity",
+              "type": "INT"
+            },
+            {
+              "column": "unit_price",
+              "type": "DECIMAL(10,2)"
+            },
+            {
+              "column": "discount_pct",
+              "type": "DECIMAL(5,2)"
+            },
+            {
+              "column": "currency",
+              "type": "STRING"
+            },
+            {
+              "column": "status",
+              "type": "STRING"
+            },
+            {
+              "column": "channel",
+              "type": "STRING"
+            },
+            {
+              "column": "payment_method",
+              "type": "STRING"
+            },
+            {
+              "column": "country_code",
+              "type": "STRING"
+            },
+            {
+              "column": "event_ts",
+              "type": "TIMESTAMP"
+            }
+          ]
+        }
+      ]
+    },
+    "inputSchema": [
+      {
+        "column": "txn_id",
+        "type": "STRING"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "register_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_code",
+        "type": "STRING"
+      },
+      {
+        "column": "customer_id",
+        "type": "INT"
+      },
+      {
+        "column": "quantity",
+        "type": "INT"
+      },
+      {
+        "column": "unit_price",
+        "type": "DECIMAL(10,2)"
+      },
+      {
+        "column": "discount_pct",
+        "type": "DECIMAL(5,2)"
+      },
+      {
+        "column": "currency",
+        "type": "STRING"
+      },
+      {
+        "column": "status",
+        "type": "STRING"
+      },
+      {
+        "column": "channel",
+        "type": "STRING"
+      },
+      {
+        "column": "payment_method",
+        "type": "STRING"
+      },
+      {
+        "column": "country_code",
+        "type": "STRING"
+      },
+      {
+        "column": "event_ts",
+        "type": "TIMESTAMP"
+      }
+    ],
+    "expectedOutput": [
+      {
+        "column": "txn_id",
+        "description": "Grade key — POS completed tickets that landed in the slice"
+      },
+      {
+        "column": "store_id",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "register_id",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "product_id",
+        "description": "Trusted — unchanged (seed was max product_id on AUDIT-* only)"
+      },
+      {
+        "column": "product_code",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "customer_id",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "quantity",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "unit_price",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "discount_pct",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "currency",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "status",
+        "description": "Exactly COMPLETED"
+      },
+      {
+        "column": "channel",
+        "description": "Exactly POS — web/app/AUDIT are gone"
+      },
+      {
+        "column": "payment_method",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "country_code",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "event_ts",
+        "description": "Trusted — unchanged"
+      }
+    ],
+    "moat": "Setter notes — not shown to learners.\n\n## What was in mind\n\nLab 3 of the **Vesper** overnight-sales sequence. Same 15-column fact. This lab teaches `sample`: a Bernoulli fraction, replayable with a seed, after the population is filtered.\n\nThey must **hunt the seed** — `max(product_id)` on rows whose `txn_id` starts with `AUDIT-` — then `filter` POS + COMPLETED (no `txn_id` predicate on the floor), then `sample(False, 0.1, seed)`.\n\nThe learner brief lists those constraints as rules, not a recipe. Intended order is hunt → filter floor → sample.\n\n| Step | Transform | Kind |\n| --- | --- | --- |\n| Audit envelopes | `max(product_id)` where `txn_id` starts with `AUDIT-` | wide — tiny agg |\n| `channel` | `filter` `== \"POS\"` | narrow |\n| `status` | `filter` `== \"COMPLETED\"` | narrow |\n| handful | `sample(False, 0.1, seed)` | narrow |\n\nAudit rows have `channel = AUDIT`, so the POS filter drops them. Do not plant `AUDIT-*` as POS completed.\n\n`sample` is not a hash of `txn_id`. Same seed + same input splits → same tickets. `repartition` before sample changes the draw.\n\nDo **not** give them the integer. Run and Submit use **different** Audit maxima so hard-coding last night's number fails Submit. Oracle computes `max`.\n\nThe question we wanted a failed Submit to answer: **did you max the Audit envelopes, then sample the floor? Or max the lake / sample then filter / hard-code 42?**\n\n## Why performance is off\n\nThis lab is functional. The Audit `max` still shuffles (AQE off so the Exchange stays visible). Time does not fail the grade. No pace bands.\n\n## How we created the cases\n\nSales start POS + COMPLETED. Some channels flip to web/app, some POS status to CANCELLED/PENDING. `product_id` on sales is 100–1000 so lake-wide max is not the Audit seed. Inputs are 4 Parquet parts.\n\n1. **`01-qa-slice` (20k unique, Run)** — Audit `product_id`s max **42**.\n2. **`02-qa-slice` (100k unique, Submit)** — different envelopes, max **87**.\n\nA job that `max(product_id)` on the full file uses ~1000 as the seed. A job that filters POS first never sees `AUDIT-*`. A job that samples then filters draws 10% of the lake.\n\nOfficial goldens are Spark-produced (`solution/src/main.py`) with the same locked `sparkConf` as Play. Grade is a row-diff on `txn_id`. `solve.py` only inspects input (seed + floor count) for generate.py.\n\n## Testcase distribution\n\nTwo overnight files. Sales start POS + COMPLETED. Some channels flip to `web`/`app`, some POS status to `CANCELLED`/`PENDING`. Sales `product_id` is 100–1000 so a lake-wide `max` is not the Audit seed. Inputs are 4 Parquet parts. `DATA_SEED=42`.\n\n| | Run `01-qa-slice` | Submit `02-qa-slice` |\n| --- | --- | --- |\n| Unique sales | 20,000 | 100,000 |\n| not POS (`web`/`app`) | 8% → 1,600 | 10% → 10,000 |\n| POS not completed | 5% → 1,000 | 6% → 6,000 |\n| Floor (POS + COMPLETED) | 17,400 | 84,000 |\n| Audit envelopes | 8 | 8 |\n| Audit `product_id`s | 7, 13, 19, 28, 31, 35, 38, **42** | 11, 22, 33, 44, 55, 66, 79, **87** |\n| Seed (`max` of those) | **42** | **87** |\n| Input rows | 20,008 | 100,008 |\n| Golden (`sample(False, 0.1, seed)` of floor) | **1,811** | **8,549** |\n\nGoldens are Spark-produced (`backend/scripts/materializeL1SampleExpected.ts`) under the same locked `sparkConf` as Play. Do not recompute Bernoulli in Python.\n"
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-sample-qa-slice/testcases/",
+    "runCases": [
+      "01-qa-slice"
+    ],
+    "submitCases": [
+      "02-qa-slice"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-sample-qa-slice/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-sample-qa-slice/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "txn_id"
+    ],
+    "gradeScript": "s3a://devlabs-data/challenges/l1-sample-qa-slice/grade/grade.py",
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g",
+      "aqe": false,
+      "shufflePartitions": 8,
+      "hardTimeoutSeconds": 120
+    },
+    "sparkConf": {
+      "spark.sql.adaptive.enabled": "false",
+      "spark.sql.shuffle.partitions": "8",
+      "spark.sql.files.maxPartitionBytes": "134217728",
+      "spark.sql.files.minPartitionNum": "1"
+    },
+    "gradeChecks": [
+      "Functional: candidate Parquet matches expected on txn_id (POS + COMPLETED slice; Audit envelopes used only for the seed)",
+      "Performance: not specified for this lab"
+    ]
+  },
+  "dataGen": {
+    "pattern": "A",
+    "dir": "challenges/l1-sample-qa-slice",
+    "script": "generate.py",
+    "runScript": "run.sh",
+    "jobYaml": "job.yaml",
+    "s3Prefix": "challenges/l1-sample-qa-slice"
+  }
+}

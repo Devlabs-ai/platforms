@@ -2,7 +2,7 @@
   "submissionId": "frozen-acme-filter-revenue-v1",
   "appName": "acme-filter-revenue-v1",
   "historyAppId": "spark-5c1b6aba2f8c49058f6db27d00dcc43a",
-  "historyUrl": "http://192.168.1.9:30080/history/spark-5c1b6aba2f8c49058f6db27d00dcc43a",
+  "historyUrl": "http://192.168.1.2:30080/history/spark-5c1b6aba2f8c49058f6db27d00dcc43a",
   "run": {
     "testcasesPrefix": "s3a://devlabs-data/challenges/l1-filter-valid-sales-rows/testcases/",
     "cases": [

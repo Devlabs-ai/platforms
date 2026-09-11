@@ -1,16 +1,16 @@
 {
   "id": "l1-derive-revenue-column",
   "number": 2,
-  "title": "Derive Revenue Column",
+  "title": "The Ticket That Rang Twice",
   "contentSource": "minio",
-  "description": "Acme\u2019s overnight sales Parquet is already cleaned \u2014 every row is a completed line Finance trusts. What BI still lacks is a single line revenue figure they can sum without re-deriving discounts in every dashboard.\n\nYour job is to add a `revenue` column to each row and write the enriched Parquet with overwrite. Keep every input column unchanged; only append `revenue`.\n\nFormula: `revenue = quantity * unit_price * (1 - discount_pct)`, rounded to 2 decimal places as `DECIMAL(12,2)`. `discount_pct` is a fraction in `[0, 0.50]` (for example `0.10` means 10% off), not a whole-number percent.\n\nInput columns: `transaction_id`, `store_id`, `product_id`, `customer_id`, `quantity`, `unit_price`, `discount_pct`, `currency`, `status`, `transaction_timestamp`. Implement with Spark DataFrame APIs (`withColumn`, arithmetic, cast) \u2014 no Python loops over collected rows. **Run** uses two smoke testcases; **Submit** uses the full set and row-diffs your Parquet against each case\u2019s `expected/`.",
+  "description": "Vesper’s overnight drop is already a completed-sales file — Lab 1 already threw out the junk. This morning the floor dashboard still could not total the till: web and app tickets had slipped in, some register retries padded the ticket id, and the same POS sale is on the file more than once.\n\nThis report is **in-store POS only**. Read that file from `INPUT_PATH`. Apply the rules below, then write Parquet to `OUTPUT_PATH`.\n\nThe file is the Vesper overnight sales fact (15 columns). Do not invent rows. Do not add columns. After you finish, Finance wants **one POS row per ticket**.\n\nUse Spark DataFrame APIs. Do not `collect()` the table and loop in Python.\n\n## Rules\n\nThese all have to be true of the file you write. They are not a recipe.\n\n- **One row per `txn_id`.** Exact repeats and padded-id repeats are the same sale. Collapse them.\n- **`txn_id`.** Strip leading and trailing spaces. The id in the output must already be trimmed.\n- **`channel`.** Keep the row only when channel is exactly `POS`. `web` and `app` are out. Do not rewrite a channel token to make it match.\n\nThe other thirteen columns are already trusted. Pass them through.\n\n## Example\n\nFive input lines. Two POS tickets should remain.\n\n**Input** (shown columns only)\n\n| txn_id | channel | quantity |\n| --- | --- | --- |\n| t1 | POS | 2 |\n| t1 | POS | 2 |\n| ·t2· | POS | 1 |\n| t3 | web | 4 |\n| t4 | app | 3 |\n\n(dots stand for spaces)\n\n**Output**\n\n| txn_id | channel | quantity |\n| --- | --- | --- |\n| t1 | POS | 2 |\n| t2 | POS | 1 |\n\n- t1 was written twice — one POS row remains.\n- t2’s padded id is the same ticket after the spaces go.\n- t3 and t4 are gone — this dashboard is POS only.\n",
   "difficulty": "L0",
   "tags": [
     "spark",
     "l0",
-    "withcolumn",
     "dataframe",
-    "parquet"
+    "parquet",
+    "dedup"
   ],
   "category": "batch-processing",
   "sandboxType": "spark-platform",
@@ -19,27 +19,96 @@
     "panelId": "spark"
   },
   "problemStatement": {
-    "overview": "Add a DECIMAL(12,2) revenue column: quantity \u00d7 unit_price \u00d7 (1 \u2212 discount_pct), keep all input columns, write Parquet to OUTPUT_PATH.",
-    "symptoms": [
-      "BI dashboards re-derive discounts differently and disagree on overnight totals.",
-      "Finance wants a single line revenue field on every sales row."
-    ],
-    "yourTaskSteps": [
-      "Read input Parquet from INPUT_PATH (platform stages selected testcase inputs).",
-      "Add revenue = quantity * unit_price * (1 - discount_pct) as DECIMAL(12,2).",
-      "Preserve all input columns; append revenue; write Parquet to OUTPUT_PATH with overwrite.",
-      "Submit is graded with a row-level compare against each selected testcase expected/."
-    ],
-    "yourTask": "Implement src/main.py that derives revenue and writes Parquet output.",
-    "hints": [
-      "Use withColumn to append revenue without dropping other columns.",
-      "Cast intermediates to decimal before multiplying if you need stable scale.",
-      "discount_pct is a fraction (0.10 = 10%), already between 0 and 0.50.",
-      "spark.read.parquet(INPUT_PATH) reads every staged testcase file."
-    ],
+    "hints": [],
+    "data": {
+      "overview": "Vesper overnight sales fact (15 columns). This dashboard is POS only. Some tickets are copied, some txn_ids are padded, some channels are web/app. Output is one POS row per ticket.",
+      "testcases": {
+        "run": [
+          {
+            "rows": 19305,
+            "detail": "unique POS tickets after filter + collapse; input is larger"
+          }
+        ],
+        "submit": [
+          {
+            "rows": 95960,
+            "detail": "unique POS tickets after filter + collapse; input is larger"
+          }
+        ]
+      },
+      "datasets": [
+        {
+          "name": "Overnight sales",
+          "env": "INPUT_PATH",
+          "kind": "fact",
+          "schema": [
+            {
+              "column": "txn_id",
+              "type": "STRING"
+            },
+            {
+              "column": "store_id",
+              "type": "INT"
+            },
+            {
+              "column": "register_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_code",
+              "type": "STRING"
+            },
+            {
+              "column": "customer_id",
+              "type": "INT"
+            },
+            {
+              "column": "quantity",
+              "type": "INT"
+            },
+            {
+              "column": "unit_price",
+              "type": "DECIMAL(10,2)"
+            },
+            {
+              "column": "discount_pct",
+              "type": "DECIMAL(5,2)"
+            },
+            {
+              "column": "currency",
+              "type": "STRING"
+            },
+            {
+              "column": "status",
+              "type": "STRING"
+            },
+            {
+              "column": "channel",
+              "type": "STRING"
+            },
+            {
+              "column": "payment_method",
+              "type": "STRING"
+            },
+            {
+              "column": "country_code",
+              "type": "STRING"
+            },
+            {
+              "column": "event_ts",
+              "type": "TIMESTAMP"
+            }
+          ]
+        }
+      ]
+    },
     "inputSchema": [
       {
-        "column": "transaction_id",
+        "column": "txn_id",
         "type": "STRING"
       },
       {
@@ -47,8 +116,16 @@
         "type": "INT"
       },
       {
+        "column": "register_id",
+        "type": "INT"
+      },
+      {
         "column": "product_id",
         "type": "INT"
+      },
+      {
+        "column": "product_code",
+        "type": "STRING"
       },
       {
         "column": "customer_id",
@@ -75,39 +152,102 @@
         "type": "STRING"
       },
       {
-        "column": "transaction_timestamp",
+        "column": "channel",
+        "type": "STRING"
+      },
+      {
+        "column": "payment_method",
+        "type": "STRING"
+      },
+      {
+        "column": "country_code",
+        "type": "STRING"
+      },
+      {
+        "column": "event_ts",
         "type": "TIMESTAMP"
       }
     ],
     "expectedOutput": [
       {
-        "column": "revenue",
-        "description": "DECIMAL(12,2) = quantity * unit_price * (1 - discount_pct), half-up to 2 dp"
+        "column": "txn_id",
+        "description": "Grade key — trimmed; one row per ticket"
+      },
+      {
+        "column": "store_id",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "register_id",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "product_id",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "product_code",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "customer_id",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "quantity",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "unit_price",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "discount_pct",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "currency",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "status",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "channel",
+        "description": "Exactly POS — web/app rows are gone"
+      },
+      {
+        "column": "payment_method",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "country_code",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "event_ts",
+        "description": "Trusted — unchanged"
       }
-    ]
+    ],
+    "moat": "Setter notes — not shown to learners.\n\n## What was in mind\n\nLab 2 of the **Vesper** overnight-sales sequence. Same 15-column fact as lab 1. This dashboard is **POS only**. The first wide op on this file is collapsing tickets.\n\nThe line we wanted them to write: two **narrow** ops, then one **wide** collapse on **`txn_id`**.\n\nThe learner brief lists those constraints **out of pipeline order** (collapse, then trim, then filter) and says they are not a recipe. Intended order is still trim → filter POS → `dropDuplicates([\"txn_id\"])`. Filter and trim commute; trim **must** happen before the collapse or padded twins survive.\n\n| Step | Transform | Kind |\n| --- | --- | --- |\n| `channel` | `filter` `== \"POS\"` | narrow |\n| `txn_id` | `trim` | narrow |\n| tickets | `dropDuplicates([\"txn_id\"])` | wide — shuffle |\n\nDuplicates are on **`txn_id`** (the ticket), not on store or product. This is not lab 10 (window, latest `event_ts` wins). Copies of a POS ticket are identical after trim, so any survivor is correct.\n\nDo **not** `lower` / `replace` channel. `pos` is not `POS`. Web/app are dropped, not rewritten.\n\nThe question we wanted History to answer on a failed Submit: **did you filter POS, trim the id, then collapse on txn_id? Or skip one?**\n\n## Why performance is light\n\n`dropDuplicates` shuffles. AQE is off so that shuffle stays visible. Functional match still decides pass/fail. Pace is labeled from Spark History. Time never flips a pass into a fail.\n\n## How we created the cases\n\nTwo files. 20k / 100k **unique** tickets, all starting as `POS`. Some are flipped to `web`/`app`. Extras are appended copies, so input is larger than output.\n\n1. **`01-run-edges` (20k unique, Run)** — exact POS copies, a padded-id copy, non-POS rows.\n2. **`02-submit-all` (100k unique, Submit)** — also padding on the original id, triple copies, and a duplicated non-POS ticket.\n\nA job that only `dropDuplicates` without `trim` keeps the padded twin. A job that never filters keeps web/app. A job that `lower`s channel to keep `pos` is the wrong lesson.\n\nOracle is `solution/solve.py`. Official goldens are Spark-produced. Grade is a row-diff on `txn_id`.\n"
   },
   "platformSpec": {
     "contentSource": "minio",
     "testcasesPrefix": "s3a://devlabs-data/challenges/l1-derive-revenue-column/testcases/",
     "runCases": [
-      "01-smoke-basic",
-      "02-smoke-edges"
+      "01-run-edges"
     ],
     "submitCases": [
-      "03-full-mix",
-      "04-full-zero-discount",
-      "05-full-high-discount",
-      "06-full-qty-edges",
-      "07-full-price-edges",
-      "08-full-balanced",
-      "09-full-stress"
+      "02-submit-all"
     ],
     "inputPath": "s3a://devlabs-data/challenges/l1-derive-revenue-column/testcases/",
     "evalSolutionPath": "s3a://devlabs-data/challenges/l1-derive-revenue-column/testcases/",
     "outputFormat": "parquet",
     "gradeKeys": [
-      "transaction_id"
+      "txn_id"
     ],
+    "gradeScript": "s3a://devlabs-data/challenges/l1-derive-revenue-column/grade/grade.py",
     "language": "python",
     "starterFileName": "src/main.py",
     "limits": {
@@ -115,13 +255,36 @@
       "driverMemory": "1g",
       "executors": 2,
       "executorCores": 1,
-      "executorMemory": "1g"
+      "executorMemory": "1g",
+      "aqe": false
+    },
+    "sparkConf": {
+      "spark.sql.adaptive.enabled": "false"
+    },
+    "scoring": {
+      "executionTime": {
+        "targetSeconds": 45,
+        "bands": [
+          {
+            "maxSeconds": 15,
+            "label": "quick",
+            "tone": "quick"
+          },
+          {
+            "maxSeconds": 45,
+            "label": "steady",
+            "tone": "steady"
+          },
+          {
+            "label": "slow",
+            "tone": "slow"
+          }
+        ]
+      }
     },
     "gradeChecks": [
-      "Spark job succeeds on selected Submit testcases",
-      "OUTPUT_PATH Parquet readable with input columns plus revenue",
-      "Each Submit testcase expected/ matches candidate rows (key + values)",
-      "No extra rows beyond the union of selected expected testcases"
+      "Functional: candidate Parquet matches expected on txn_id (POS only, trimmed id, one row per ticket)",
+      "Performance: shuffle from dropDuplicates is visible; pace is labeled from History and does not fail the lab"
     ]
   }
 }

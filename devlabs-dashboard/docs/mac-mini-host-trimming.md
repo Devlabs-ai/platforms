@@ -32,7 +32,7 @@ colima start --cpu 8 --memory 12.5 --kubernetes
     └── platform pods       ~4–6 GiB typical (bursts with Airflow + Spark)
 ```
 
-Host free RAM under **~500 MiB** while workloads run is a warning sign. Flaky `http://192.168.1.9:30xxx` URLs usually mean **host or pod OOM** — see [reliability guide](mac-mini-platform-reliability.md).
+Host free RAM under **~500 MiB** while workloads run is a warning sign. Flaky `http://192.168.1.2:30xxx` URLs usually mean **host or pod OOM** — see [reliability guide](mac-mini-platform-reliability.md).
 
 ---
 

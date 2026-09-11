@@ -1,6 +1,6 @@
 # Mac Mini platform reliability — flaky URLs and OOM behavior
 
-Why `http://192.168.1.9:30xxx` URLs sometimes show **“This site can’t be reached”** on the home-lab cluster, and what to do about it.
+Why `http://192.168.1.2:30xxx` URLs sometimes show **“This site can’t be reached”** on the home-lab cluster, and what to do about it.
 
 **Related:** [Mac Mini server setup](../../devlabs/docs/mac-mini-server-setup.md) · [Host memory — when to act](mac-mini-host-trimming.md) · [Airflow Platform](../../airflow-platform/docs/airflow-platform-kubernetes.md) · [Spark Platform](../../spark-platform/docs/spark-platform-kubernetes.md)
 
@@ -10,7 +10,7 @@ Why `http://192.168.1.9:30xxx` URLs sometimes show **“This site can’t be rea
 
 | Question | Answer |
 |----------|--------|
-| Is this an **internet** problem? | **No.** URLs use the **LAN IP** `192.168.1.9`. No public internet is involved. |
+| Is this an **internet** problem? | **No.** URLs use the **LAN IP** `192.168.1.2`. No public internet is involved. |
 | What does “can’t be reached” mean? | Nothing is listening on that port — usually a **pod crashed**, **restarted**, or **Colima is down**. |
 | Main cause on 16 GB Mac Mini? | **Host RAM exhaustion** → Kubernetes **OOMKills** pods → brief outages. |
 | Most affected service? | **Airflow webserver** (`:30081`) — Gunicorn workers are memory-heavy. |
@@ -25,7 +25,7 @@ MacBook (192.168.1.x)
     ▼
 Router
     ▼
-Mac Mini host (192.168.1.9) — macOS + Colima VM
+Mac Mini host (192.168.1.2) — macOS + Colima VM
     ▼
 k3s NodePorts (30088, 30081, 30900, …)
     ▼
@@ -78,7 +78,7 @@ Received signal: 15. Closing gunicorn.
 - `webserver.resources.limits.memory: 1536Mi`
 - Relaxed `livenessProbe` / `readinessProbe` (higher `failureThreshold`, longer `periodSeconds`)
 
-Redeploy: `MAC_MINI_IP=192.168.1.9 scripts/deploy.sh`
+Redeploy: `MAC_MINI_IP=192.168.1.2 scripts/deploy.sh`
 
 ---
 
@@ -128,8 +128,8 @@ Each DAG grid/API call uses workers. **Rapid navigation** increases memory and t
 | **Colima stop/restart** | 1–3 min | `colima status` on Mac Mini |
 | **Mac Mini reboot** (Colima not auto-started) | Until manual `colima start` | `colima list` |
 | **Pod OOM / CrashLoop** | 30s–2 min per restart | `kubectl get pods -A` |
-| **DHCP IP change** | Until you fix IP | `192.168.1.9` still correct? |
-| **Browser HTTP proxy** | Intermittent | Proxy off for `192.168.1.9` |
+| **DHCP IP change** | Until you fix IP | `192.168.1.2` still correct? |
+| **Browser HTTP proxy** | Intermittent | Proxy off for `192.168.1.2` |
 | **Using `https://`** | Always fails | Use **`http://`** only |
 | **Chrome “Always use secure connections”** | Auto-upgrades to HTTPS → “can’t be reached” | Chrome → Settings → Privacy and security → Security → disable **Always use secure connections** |
 
@@ -139,12 +139,12 @@ Each DAG grid/API call uses workers. **Rapid navigation** increases memory and t
 
 | URL | Service | Typical flakiness |
 |-----|---------|-------------------|
-| http://192.168.1.9:30088 | Spark job portal | Low (lighter API) |
-| http://192.168.1.9:30080 | Spark History Server | Low–medium |
-| http://192.168.1.9:30081 | Airflow UI | **High** (Gunicorn + UI load) |
-| http://192.168.1.9:30089 | Airflow Platform portal | Medium (if deployed) |
-| http://192.168.1.9:30900 | MinIO S3 API | Low |
-| http://192.168.1.9:30901 | MinIO console | Low |
+| http://192.168.1.2:30088 | Spark job portal | Low (lighter API) |
+| http://192.168.1.2:30080 | Spark History Server | Low–medium |
+| http://192.168.1.2:30081 | Airflow UI | **High** (Gunicorn + UI load) |
+| http://192.168.1.2:30089 | Airflow Platform portal | Medium (if deployed) |
+| http://192.168.1.2:30900 | MinIO S3 API | Low |
+| http://192.168.1.2:30901 | MinIO console | Low |
 
 ---
 
@@ -153,7 +153,7 @@ Each DAG grid/API call uses workers. **Rapid navigation** increases memory and t
 ### 1. Is the Mac Mini up?
 
 ```bash
-ping -c 3 192.168.1.9
+ping -c 3 192.168.1.2
 ssh devlabs-mini 'echo ok'
 ```
 
@@ -186,9 +186,9 @@ If **host free RAM is under ~1 GiB**, expect flakiness.
 ### 5. Test URL from MacBook (bypasses browser cache/proxy)
 
 ```bash
-curl -s -o /dev/null -w "spark:%{http_code}\n"  http://192.168.1.9:30088/api/health
-curl -s -o /dev/null -w "airflow:%{http_code}\n" http://192.168.1.9:30081/health
-curl -s -o /dev/null -w "minio:%{http_code}\n"  http://192.168.1.9:30901/minio/health/live
+curl -s -o /dev/null -w "spark:%{http_code}\n"  http://192.168.1.2:30088/api/health
+curl -s -o /dev/null -w "airflow:%{http_code}\n" http://192.168.1.2:30081/health
+curl -s -o /dev/null -w "minio:%{http_code}\n"  http://192.168.1.2:30901/minio/health/live
 ```
 
 - `000` or timeout → service down or NodePort not bound.
@@ -220,7 +220,7 @@ ssh devlabs-mini 'bash -lc "
 Redeploy Airflow after value changes:
 
 ```bash
-MAC_MINI_IP=192.168.1.9 scripts/deploy.sh
+MAC_MINI_IP=192.168.1.2 scripts/deploy.sh
 ```
 
 ---
@@ -229,8 +229,8 @@ MAC_MINI_IP=192.168.1.9 scripts/deploy.sh
 
 ### Do
 
-- Use **`http://192.168.1.9:PORT`** explicitly.
-- Reserve **192.168.1.9** in the router (DHCP reservation).
+- Use **`http://192.168.1.2:PORT`** explicitly.
+- Reserve **192.168.1.2** in the router (DHCP reservation).
 - Run **headless**: quit Cursor and other heavy apps on the Mac Mini.
 - Start Colima after reboot:  
   `colima start --cpu 8 --memory 12.5 --kubernetes`
@@ -240,7 +240,7 @@ MAC_MINI_IP=192.168.1.9 scripts/deploy.sh
 ### Avoid
 
 - **`https://`** on NodePorts (no TLS on these services).
-- Chrome **“Always use secure connections”** — upgrades `http://192.168.1.9` to `https://` and the page fails with “can’t be reached” (see below).
+- Chrome **“Always use secure connections”** — upgrades `http://192.168.1.2` to `https://` and the page fails with “can’t be reached” (see below).
 - System/browser **HTTP proxy** for LAN IPs.
 - Running **many platforms + Spark jobs + Airflow UI** concurrently on 16 GB.
 - Assuming **`kubectl top` low %** means the host has plenty of RAM.
@@ -280,7 +280,7 @@ Current Colima allocation: **8 CPU / 12.5 GiB RAM**. Host free RAM (`vm_stat` on
 ```text
 Browser: "Can't be reached"
     │
-    ├─ ping 192.168.1.9 fails → LAN / Mac Mini asleep / wrong IP
+    ├─ ping 192.168.1.2 fails → LAN / Mac Mini asleep / wrong IP
     │
     ├─ ping OK, curl returns 000 → Colima down or pod crashed
     │       ├─ colima status not running → colima start ...

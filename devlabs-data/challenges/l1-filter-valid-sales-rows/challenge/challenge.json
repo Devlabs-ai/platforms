@@ -1,14 +1,13 @@
 {
   "id": "l1-filter-valid-sales-rows",
   "number": 1,
-  "title": "Filter Valid Sales Rows",
+  "title": "The Night the Till Lied",
   "contentSource": "minio",
-  "description": "Vesper Markets closes every store each night and drops a single Parquet sales file into the data lake. This morning Finance opened their dashboard and the overnight revenue numbers looked wrong \u2014 cancelled tickets, missing products, wild quantities, and odd currencies had slipped into the feed.\n\nYour job is to clean that overnight drop before the BI team aggregates it. Read the input Parquet from `INPUT_PATH`, keep only rows that Finance can safely total, and write the cleaned dataset as Parquet to `OUTPUT_PATH`.\n\n**Do not repair values; if a row fails any rule, drop it.**\n\nThe file has ten columns: `transaction_id`, `store_id`, `product_id`, `customer_id`, `quantity`, `unit_price`, `discount_pct`, `currency`, `status`, and `transaction_timestamp`. Most columns are already well-formed in the seed data and should simply be preserved. Only four fields are under validation:\n\n- `product_id` must not be null\n- `quantity` must not be null, must be greater than 0, and must be less than or equal to 100\n- `currency` must be one of `USD`, `EUR`, or `GBP`\n- `status` must equal `COMPLETED`\n\nA row is valid only when every check above passes. Implement the filter with Spark DataFrame APIs.\n\n**Note: Prefer DataFrame transformations \u2014 do not collect rows and filter them in Python loops.**",
+  "description": "Vesper Markets closes every store at night and drops one Parquet sales file into the lake. This morning Finance opened the overnight dashboard and the totals were wrong — missing products, impossible quantities, blank discounts, currency aliases, and mixed ticket statuses had slipped into the feed.\n\nRead that drop from `INPUT_PATH`. Apply the rules below, then write Parquet to `OUTPUT_PATH`.\n\nThe file is the Vesper overnight sales fact (15 columns). Only `product_id`, `quantity`, `discount_pct`, `currency`, and `status` need work on this lab. The other ten columns are already trusted — do not drop or rewrite them.\n\nUse Spark DataFrame APIs. Do not `collect()` the table and loop in Python.\n\n## Rules\n\nWork column by column. A row is in the output only when every rule is satisfied. Values you normalize must appear that way in the written Parquet.\n\n- **`currency`.** Treat `usd` and `$` as `USD`, `eur` as `EUR`, `gbp` as `GBP`. A missing currency is `USD`. After that, keep the row only if currency is `USD`, `EUR`, or `GBP`. `INR` is out.\n- **`status`.** Treat `complete`, `Complete`, and `completed` as `COMPLETED`. Keep the row only if status is exactly `COMPLETED`. `CANCELLED` and `PENDING` are out.\n- **`discount_pct`.** A missing discount is `0`.\n- **`product_id`.** A missing product cannot be booked. Drop the row. Do not invent an id.\n- **`quantity`.** Keep when `> 0` and `<= 100`. `100` stays. `0`, negatives, and `101+` go.\n\n## Example\n\nSeven input lines. Two should remain, and those two must already be normalized.\n\n**Input**\n\n| txn_id | product_id | quantity | discount_pct | currency | status |\n| --- | --- | --- | --- | --- | --- |\n| t1 | 10 | 2 | 0.10 | USD | COMPLETED |\n| t2 | *null* | 2 | 0.10 | USD | COMPLETED |\n| t3 | 10 | 0 | 0.10 | USD | COMPLETED |\n| t4 | 10 | 100 | *null* | usd | complete |\n| t5 | 10 | 101 | 0.10 | USD | COMPLETED |\n| t6 | 10 | 2 | 0.10 | INR | COMPLETED |\n| t7 | 10 | 2 | 0.10 | USD | CANCELLED |\n\n**Output** — only t1 and t4. t4’s values have changed.\n\n| txn_id | product_id | quantity | discount_pct | currency | status |\n| --- | --- | --- | --- | --- | --- |\n| t1 | 10 | 2 | 0.10 | USD | COMPLETED |\n| t4 | 10 | 100 | 0 | USD | COMPLETED |\n\n- t1 is already valid, so it is unchanged.\n- t4 is kept: quantity `100` is allowed, the missing discount becomes `0`, `usd` becomes `USD`, and `complete` becomes `COMPLETED`.\n- t2 is gone — no `product_id`.\n- t3 is gone — quantity is `0`.\n- t5 is gone — quantity is `101`.\n- t6 is gone — currency is `INR`.\n- t7 is gone — status is `CANCELLED`.\n",
   "difficulty": "L0",
   "tags": [
     "spark",
     "l0",
-    "filter",
     "dataframe",
     "parquet"
   ],
@@ -20,9 +19,93 @@
   },
   "problemStatement": {
     "hints": [],
+    "data": {
+      "overview": "Vesper overnight sales fact (15 columns). Dirt is only on product_id, quantity, discount_pct, currency, and status — the other ten columns are already trusted.",
+      "testcases": {
+        "run": [
+          {
+            "rows": 20000
+          }
+        ],
+        "submit": [
+          {
+            "rows": 100000
+          }
+        ]
+      },
+      "datasets": [
+        {
+          "name": "Overnight sales",
+          "env": "INPUT_PATH",
+          "kind": "fact",
+          "schema": [
+            {
+              "column": "txn_id",
+              "type": "STRING"
+            },
+            {
+              "column": "store_id",
+              "type": "INT"
+            },
+            {
+              "column": "register_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_code",
+              "type": "STRING"
+            },
+            {
+              "column": "customer_id",
+              "type": "INT"
+            },
+            {
+              "column": "quantity",
+              "type": "INT"
+            },
+            {
+              "column": "unit_price",
+              "type": "DECIMAL(10,2)"
+            },
+            {
+              "column": "discount_pct",
+              "type": "DECIMAL(5,2)"
+            },
+            {
+              "column": "currency",
+              "type": "STRING"
+            },
+            {
+              "column": "status",
+              "type": "STRING"
+            },
+            {
+              "column": "channel",
+              "type": "STRING"
+            },
+            {
+              "column": "payment_method",
+              "type": "STRING"
+            },
+            {
+              "column": "country_code",
+              "type": "STRING"
+            },
+            {
+              "column": "event_ts",
+              "type": "TIMESTAMP"
+            }
+          ]
+        }
+      ]
+    },
     "inputSchema": [
       {
-        "column": "transaction_id",
+        "column": "txn_id",
         "type": "STRING"
       },
       {
@@ -30,8 +113,16 @@
         "type": "INT"
       },
       {
+        "column": "register_id",
+        "type": "INT"
+      },
+      {
         "column": "product_id",
         "type": "INT"
+      },
+      {
+        "column": "product_code",
+        "type": "STRING"
       },
       {
         "column": "customer_id",
@@ -58,34 +149,102 @@
         "type": "STRING"
       },
       {
-        "column": "transaction_timestamp",
+        "column": "channel",
+        "type": "STRING"
+      },
+      {
+        "column": "payment_method",
+        "type": "STRING"
+      },
+      {
+        "column": "country_code",
+        "type": "STRING"
+      },
+      {
+        "column": "event_ts",
         "type": "TIMESTAMP"
       }
-    ]
+    ],
+    "expectedOutput": [
+      {
+        "column": "txn_id",
+        "description": "Grade key — unchanged"
+      },
+      {
+        "column": "store_id",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "register_id",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "product_id",
+        "description": "Present on kept rows"
+      },
+      {
+        "column": "product_code",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "customer_id",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "quantity",
+        "description": "In (0, 100] on kept rows"
+      },
+      {
+        "column": "unit_price",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "discount_pct",
+        "description": "Missing discount is 0"
+      },
+      {
+        "column": "currency",
+        "description": "USD, EUR, or GBP"
+      },
+      {
+        "column": "status",
+        "description": "COMPLETED"
+      },
+      {
+        "column": "channel",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "payment_method",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "country_code",
+        "description": "Trusted — unchanged"
+      },
+      {
+        "column": "event_ts",
+        "description": "Trusted — unchanged"
+      }
+    ],
+    "moat": "Setter notes — not shown to learners.\n\n## What was in mind\n\nLab 1 of the **Vesper** overnight-sales sequence. The skill is not “drop bad rows.” It is using **`replace`, `fillna`, `dropna`, and `filter` together**, each on a different column, in that order.\n\nOnly five columns are dirty: `product_id`, `quantity`, `discount_pct`, `currency`, `status`. Everything else on the file is already good so they cannot hide a wrong transform behind noise on `store_id` / `unit_price` / ids.\n\nThe question we wanted History to answer on a failed Submit: **which of the four operations did you skip, and did you apply them in the wrong order?**\n\n## Column → transform\n\n| Column | Transform | Why |\n| --- | --- | --- |\n| `currency` | `replace` then `fillna` then `filter` | `usd` / `$` must become `USD` before the allow-list. Null becomes `USD`. `INR` still drops. |\n| `status` | `replace` then `filter` | `complete` / `Complete` / `completed` → `COMPLETED`. `CANCELLED` / `PENDING` still drop. |\n| `discount_pct` | `fillna` `0` | Missing discount is 0, not a dropped sale. |\n| `product_id` | `dropna` | No product → no line. Filling 0 would be a lie. |\n| `quantity` | `filter` `(0, 100]` | `100` stays. `0` / negatives / `101+` go. Not repaired. |\n\nIntended pipeline: replace → fillna → dropna → filter.\n\n## How we created the cases\n\nTwo files only. Size is not the lesson (these are narrow column ops). 20k Run / 100k Submit is enough to look like a drop without a case matrix.\n\n1. **`01-run-edges` (20k, Run)** — subset: null `product_id`, `quantity` 0 and 100, null `discount_pct`, `usd`, `complete`. Enough to see each transform. No `INR`, no `101`, no `CANCELLED`, no null currency.\n2. **`02-submit-all` (100k, Submit)** — every kind: also negatives, `101+`, `$`, null currency, `INR`, `Complete`, `CANCELLED`, `PENDING`.\n\nA filter-only job fails Submit: alias rows are dropped instead of repaired, null discounts stay null, null currency is gone instead of `USD`.\n\nTrusted columns (`transaction_id`, `store_id`, `customer_id`, `unit_price`, `transaction_timestamp`) are never dirtied.\n\nOracle is `solution/solve.py` (same rules as `solution/src/main.py`). Grade is a row-diff on `transaction_id`, including repaired values.\n\n## What this is not\n\n- Not revenue (lab 2). `unit_price` is pass-through.\n- Not SKU normalize (lab 3). No `product_code`.\n- Not a shared `datasets/` table. Fixtures live under `challenges/l1-filter-valid-sales-rows/testcases/`.\n- Not a 10-isolate matrix and not a size-of-data lab.\n"
   },
   "platformSpec": {
     "contentSource": "minio",
     "testcasesPrefix": "s3a://devlabs-data/challenges/l1-filter-valid-sales-rows/testcases/",
     "runCases": [
-      "01-smoke-basic",
-      "02-smoke-edges"
+      "01-run-edges"
     ],
     "submitCases": [
-      "03-full-mix",
-      "04-full-nulls",
-      "05-full-quantity",
-      "06-full-quantity-cap",
-      "07-full-currency",
-      "08-full-status",
-      "09-full-balanced",
-      "10-full-stress"
+      "02-submit-all"
     ],
     "inputPath": "s3a://devlabs-data/challenges/l1-filter-valid-sales-rows/testcases/",
     "evalSolutionPath": "s3a://devlabs-data/challenges/l1-filter-valid-sales-rows/testcases/",
     "outputFormat": "parquet",
     "gradeKeys": [
-      "transaction_id"
+      "txn_id"
     ],
+    "gradeScript": "s3a://devlabs-data/challenges/l1-filter-valid-sales-rows/grade/grade.py",
     "language": "python",
     "starterFileName": "src/main.py",
     "limits": {
@@ -93,10 +252,15 @@
       "driverMemory": "1g",
       "executors": 2,
       "executorCores": 1,
-      "executorMemory": "1g"
+      "executorMemory": "1g",
+      "aqe": false
+    },
+    "sparkConf": {
+      "spark.sql.adaptive.enabled": "false"
     },
     "gradeChecks": [
-      "Once the Spark job succeeds, we evaluate your output against the expected results for every Submit testcase. Pass all cases to mark this lab Solved."
+      "Functional: candidate Parquet matches expected row by row on txn_id (all columns)",
+      "Performance: not specified for this lab"
     ]
   }
 }

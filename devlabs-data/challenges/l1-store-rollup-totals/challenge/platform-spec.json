@@ -1,0 +1,38 @@
+{
+  "contentSource": "minio",
+  "testcasesPrefix": "s3a://devlabs-data/challenges/l1-store-rollup-totals/testcases/",
+  "runCases": [
+    "01-rollup"
+  ],
+  "submitCases": [
+    "02-rollup"
+  ],
+  "inputPath": "s3a://devlabs-data/challenges/l1-store-rollup-totals/testcases/",
+  "evalSolutionPath": "s3a://devlabs-data/challenges/l1-store-rollup-totals/testcases/",
+  "outputFormat": "parquet",
+  "gradeKeys": [
+    "store_id",
+    "payment_method"
+  ],
+  "gradeScript": "s3a://devlabs-data/challenges/l1-store-rollup-totals/grade/grade.py",
+  "language": "python",
+  "starterFileName": "src/main.py",
+  "limits": {
+    "driver": 1,
+    "driverMemory": "1g",
+    "executors": 2,
+    "executorCores": 1,
+    "executorMemory": "1g",
+    "aqe": false,
+    "shufflePartitions": 8,
+    "hardTimeoutSeconds": 120
+  },
+  "sparkConf": {
+    "spark.sql.adaptive.enabled": "false",
+    "spark.sql.shuffle.partitions": "8"
+  },
+  "gradeChecks": [
+    "Functional: candidate Parquet has detail + store subtotal + grand total rows with correct revenue",
+    "Performance: not specified for this lab"
+  ]
+}

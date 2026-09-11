@@ -1,42 +1,56 @@
 #!/usr/bin/env python3
-"""Oracle: derive revenue = quantity * unit_price * (1 - discount_pct), ROUND_HALF_UP to 2 dp."""
+"""Oracle: trim txn_id → keep channel == POS → one row per txn_id.
+
+Same rules as solution/src/main.py. Used by generate.py to write expected/.
+Official goldens are rematerialized from the Spark solution.
+"""
 
 from __future__ import annotations
 
-from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-REVENUE_TYPE = pa.decimal128(12, 2)
-TWOPLACES = Decimal("0.01")
+KEEP_CHANNEL = "POS"
 
 
-def compute_revenue(quantity: int, unit_price: Decimal, discount_pct: Decimal) -> Decimal:
-    raw = Decimal(quantity) * Decimal(unit_price) * (Decimal("1") - Decimal(discount_pct))
-    return raw.quantize(TWOPLACES, rounding=ROUND_HALF_UP)
+def clean_row(row: dict) -> dict | None:
+    out = dict(row)
+    if out.get("channel") != KEEP_CHANNEL:
+        return None
+    txn_id = out.get("txn_id")
+    if txn_id is not None:
+        out["txn_id"] = str(txn_id).strip()
+    return out
 
 
-def enrich_table(table: pa.Table) -> pa.Table:
-    rows = table.to_pylist()
-    for r in rows:
-        r["revenue"] = compute_revenue(r["quantity"], r["unit_price"], r["discount_pct"])
-    fields = list(table.schema) + [pa.field("revenue", REVENUE_TYPE)]
-    return pa.Table.from_pylist(rows, schema=pa.schema(fields))
+def collapse_table(table: pa.Table) -> pa.Table:
+    seen: set[str] = set()
+    kept: list[dict] = []
+    for raw in table.to_pylist():
+        row = clean_row(raw)
+        if row is None:
+            continue
+        key = row["txn_id"]
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(row)
+    return pa.Table.from_pylist(kept, schema=table.schema)
 
 
 def write_expected(input_dir: Path, expected_dir: Path) -> int:
     input_dir = Path(input_dir)
     expected_dir = Path(expected_dir)
     table = pq.read_table(input_dir)
-    enriched = enrich_table(table)
+    collapsed = collapse_table(table)
 
     if expected_dir.exists():
         for child in expected_dir.iterdir():
             if child.is_file():
                 child.unlink()
     expected_dir.mkdir(parents=True, exist_ok=True)
-    pq.write_table(enriched, expected_dir / "part-00000.parquet", compression="snappy")
+    pq.write_table(collapsed, expected_dir / "part-00000.parquet", compression="snappy")
     (expected_dir / "_SUCCESS").write_text("")
-    return enriched.num_rows
+    return collapsed.num_rows

@@ -2,18 +2,12 @@
 """
 Generate L1 Filter Valid Sales Rows testcases for MinIO.
 
-Layout (local + MinIO under DATA_S3_PREFIX):
-  challenge/          # description, hints, platform spec (challenge.json, …)
-  starter/            # initial workspace files for Play
-  solution/           # solve.py + Spark src/main.py
-  testcases/<case-id>/{input,expected}/part-00000.parquet
-  manifest.json
+Two cases, 15-col Vesper sales schema (datasets/vesper/schema.py):
+  01-run-edges      Run     20k   — a subset of edges (learn each transform)
+  02-submit-all     Submit 100k   — every moat edge
 
-expected/ is written by solution/solve.py (same validity as solution/src/main.py).
-challenge/, starter/, and solution/ are staged and uploaded to S3 (contentSource=minio).
-
-Run / Submit select case ids from the manifest (no separate run/ or submit/ trees).
-The platform stages selected inputs at job launch.
+Dirt is planted only on product_id, quantity, discount_pct, currency, status.
+All other columns are always well-formed.
 """
 
 from __future__ import annotations
@@ -25,59 +19,62 @@ import random
 import shutil
 import sys
 import tempfile
-import uuid
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-import pyarrow as pa
 import pyarrow.parquet as pq
 
 _CHALLENGE_DIR = Path(__file__).resolve().parent
-if str(_CHALLENGE_DIR) not in sys.path:
-    sys.path.insert(0, str(_CHALLENGE_DIR))
+_VESPER = _CHALLENGE_DIR.parents[1] / "datasets" / "vesper"
+for extra in (_CHALLENGE_DIR, _VESPER):
+    if str(extra) not in sys.path:
+        sys.path.insert(0, str(extra))
 
+from schema import generate_clean_rows, rows_to_table  # noqa: E402
 from solution.solve import write_expected  # noqa: E402
 
 DEFAULT_PREFIX = "challenges/l1-filter-valid-sales-rows"
 DATA_SEED = int(os.environ.get("DATA_SEED", "42"))
 
-ALLOWED_CURRENCIES = ("USD", "EUR", "GBP")
-INVALID_KINDS = (
+# Run: enough to exercise each transform, not the full gauntlet.
+RUN_KINDS = (
     "null_product_id",
-    "non_positive_quantity",
-    "quantity_too_large",
-    "bad_currency",
-    "bad_status",
+    "qty_zero",
+    "qty_100",
+    "null_discount",
+    "currency_usd_alias",
+    "status_complete_alias",
 )
 
-SCHEMA = pa.schema(
-    [
-        ("transaction_id", pa.string()),
-        ("store_id", pa.int32()),
-        ("product_id", pa.int32()),
-        ("customer_id", pa.int32()),
-        ("quantity", pa.int32()),
-        ("unit_price", pa.decimal128(10, 2)),
-        ("discount_pct", pa.decimal128(5, 2)),
-        ("currency", pa.string()),
-        ("status", pa.string()),
-        ("transaction_timestamp", pa.timestamp("us", tz="UTC")),
-    ]
+# Submit: every edge on the moat.
+SUBMIT_KINDS = RUN_KINDS + (
+    "qty_negative",
+    "qty_over",
+    "currency_dollar",
+    "currency_null",
+    "currency_inr",
+    "status_Complete",
+    "status_cancelled",
+    "status_pending",
 )
+
+# Schema is datasets/vesper/schema.py (15-col Vesper sales fact).
 
 CASE_SPECS: list[dict[str, Any]] = [
-    {"id": "01-smoke-basic", "tier": "run", "rows": 40, "invalid_rate": 0.30},
-    {"id": "02-smoke-edges", "tier": "run", "rows": 60, "invalid_rate": 0.35},
-    {"id": "03-full-mix", "tier": "submit", "rows": 400, "invalid_rate": 0.15},
-    {"id": "04-full-nulls", "tier": "submit", "rows": 500, "invalid_rate": 0.20, "kind_bias": "null_product_id"},
-    {"id": "05-full-quantity", "tier": "submit", "rows": 500, "invalid_rate": 0.20, "kind_bias": "non_positive_quantity"},
-    {"id": "06-full-quantity-cap", "tier": "submit", "rows": 500, "invalid_rate": 0.18, "kind_bias": "quantity_too_large"},
-    {"id": "07-full-currency", "tier": "submit", "rows": 600, "invalid_rate": 0.18, "kind_bias": "bad_currency"},
-    {"id": "08-full-status", "tier": "submit", "rows": 600, "invalid_rate": 0.18, "kind_bias": "bad_status"},
-    {"id": "09-full-balanced", "tier": "submit", "rows": 800, "invalid_rate": 0.15},
-    {"id": "10-full-stress", "tier": "submit", "rows": 2000, "invalid_rate": float(os.environ.get("INVALID_RATE", "0.15"))},
+    {
+        "id": "01-run-edges",
+        "tier": "run",
+        "rows": 20_000,
+        "dirty_rate": 0.10,
+        "kinds": RUN_KINDS,
+    },
+    {
+        "id": "02-submit-all",
+        "tier": "submit",
+        "rows": 100_000,
+        "dirty_rate": float(os.environ.get("INVALID_RATE", "0.12")),
+        "kinds": SUBMIT_KINDS,
+    },
 ]
 
 
@@ -92,121 +89,83 @@ def _minio_client():
     return Minio(host, access_key=access, secret_key=secret, secure=secure)
 
 
-def _dec_price(rng: random.Random) -> Decimal:
-    return Decimal(str(round(rng.uniform(1.0, 99.99), 2)))
-
-
-def _dec_discount(rng: random.Random) -> Decimal:
-    return Decimal(str(round(rng.uniform(0.0, 0.5), 2)))
-
-
-def _base_row(rng: random.Random, business_day: datetime) -> dict:
-    open_at = business_day.replace(hour=9, minute=0, second=0, microsecond=0)
-    ts = open_at + timedelta(seconds=rng.randint(0, 12 * 3600 - 1))
-    return {
-        "transaction_id": str(uuid.UUID(int=rng.getrandbits(128), version=4)),
-        "store_id": rng.randint(1, 50),
-        "product_id": rng.randint(1, 1000),
-        "customer_id": rng.randint(1, 50000),
-        "quantity": rng.randint(1, 100),
-        "unit_price": _dec_price(rng),
-        "discount_pct": _dec_discount(rng),
-        "currency": rng.choice(ALLOWED_CURRENCIES),
-        "status": "COMPLETED",
-        "transaction_timestamp": ts,
-    }
-
-
-def _apply_invalid_kind(row: dict, kind: str, rng: random.Random) -> None:
+def _apply_kind(row: dict, kind: str, rng: random.Random) -> None:
     if kind == "null_product_id":
         row["product_id"] = None
-    elif kind == "non_positive_quantity":
-        row["quantity"] = None if rng.random() < 0.5 else rng.choice([0, -1, -5])
-    elif kind == "quantity_too_large":
+    elif kind == "qty_zero":
+        row["quantity"] = 0
+    elif kind == "qty_negative":
+        row["quantity"] = rng.choice([-1, -5])
+    elif kind == "qty_over":
         row["quantity"] = rng.randint(101, 500)
-    elif kind == "bad_currency":
-        row["currency"] = None if rng.random() < 0.3 else rng.choice(["INR", "JPY", "AUD"])
-    elif kind == "bad_status":
-        row["status"] = None if rng.random() < 0.3 else rng.choice(["CANCELLED", "PENDING", "FAILED"])
+    elif kind == "qty_100":
+        row["quantity"] = 100
+    elif kind == "null_discount":
+        row["discount_pct"] = None
+    elif kind == "currency_usd_alias":
+        row["currency"] = "usd"
+    elif kind == "currency_dollar":
+        row["currency"] = "$"
+    elif kind == "currency_null":
+        row["currency"] = None
+    elif kind == "currency_inr":
+        row["currency"] = "INR"
+    elif kind == "status_complete_alias":
+        row["status"] = "complete"
+    elif kind == "status_Complete":
+        row["status"] = "Complete"
+    elif kind == "status_cancelled":
+        row["status"] = "CANCELLED"
+    elif kind == "status_pending":
+        row["status"] = "PENDING"
     else:
-        raise ValueError(f"unknown invalid kind: {kind}")
-
-
-def _rows_to_table(rows: list[dict]) -> pa.Table:
-    return pa.table(
-        {
-            "transaction_id": [r["transaction_id"] for r in rows],
-            "store_id": pa.array([r["store_id"] for r in rows], type=pa.int32()),
-            "product_id": pa.array([r["product_id"] for r in rows], type=pa.int32()),
-            "customer_id": pa.array([r["customer_id"] for r in rows], type=pa.int32()),
-            "quantity": pa.array([r["quantity"] for r in rows], type=pa.int32()),
-            "unit_price": pa.array([r["unit_price"] for r in rows], type=pa.decimal128(10, 2)),
-            "discount_pct": pa.array(
-                [r["discount_pct"] for r in rows], type=pa.decimal128(5, 2)
-            ),
-            "currency": [r["currency"] for r in rows],
-            "status": [r["status"] for r in rows],
-            "transaction_timestamp": pa.array(
-                [r["transaction_timestamp"] for r in rows],
-                type=pa.timestamp("us", tz="UTC"),
-            ),
-        },
-        schema=SCHEMA,
-    )
-
-
-def _pick_invalid_kind(rng: random.Random, bias: str | None) -> str:
-    if bias and rng.random() < 0.55:
-        return bias
-    return rng.choice(INVALID_KINDS)
+        raise ValueError(f"unknown kind: {kind}")
 
 
 def generate_rows(
     *,
     n_rows: int,
-    invalid_rate: float,
+    dirty_rate: float,
     seed: int,
-    kind_bias: str | None = None,
+    kinds: tuple[str, ...],
 ) -> tuple[list[dict], dict[str, int]]:
-    if n_rows < len(INVALID_KINDS):
-        raise SystemExit(f"rows must be >= {len(INVALID_KINDS)}, got {n_rows}")
+    if n_rows < len(kinds):
+        raise SystemExit(f"rows must be >= {len(kinds)}, got {n_rows}")
 
+    # Same clean rows as datasets/vesper/sales/100k (DATA_SEED), then this
+    # lab plants dirt only on the five in-scope columns.
+    rows = generate_clean_rows(n_rows, DATA_SEED)
     rng = random.Random(seed)
-    business_day = datetime(2026, 1, 15, tzinfo=timezone.utc)
-    target_invalid = max(len(INVALID_KINDS), int(round(n_rows * invalid_rate)))
-    target_invalid = min(target_invalid, n_rows)
+    target_dirty = max(len(kinds), int(round(n_rows * dirty_rate)))
+    target_dirty = min(target_dirty, n_rows)
 
     kind_plan: list[str | None] = [None] * n_rows
-    for i, kind in enumerate(INVALID_KINDS):
+    for i, kind in enumerate(kinds):
         kind_plan[i] = kind
-    remaining = target_invalid - len(INVALID_KINDS)
-    slots = list(range(len(INVALID_KINDS), n_rows))
+    remaining = target_dirty - len(kinds)
+    slots = list(range(len(kinds), n_rows))
     rng.shuffle(slots)
     for idx in slots[:remaining]:
-        kind_plan[idx] = _pick_invalid_kind(rng, kind_bias)
+        kind_plan[idx] = rng.choice(kinds)
     rng.shuffle(kind_plan)
 
-    rows: list[dict] = []
-    kind_counts = {k: 0 for k in INVALID_KINDS}
-    for kind in kind_plan:
-        row = _base_row(rng, business_day)
+    kind_counts = {k: 0 for k in kinds}
+    for row, kind in zip(rows, kind_plan):
         if kind is not None:
-            _apply_invalid_kind(row, kind, rng)
+            _apply_kind(row, kind, rng)
             kind_counts[kind] += 1
-        rows.append(row)
     return rows, kind_counts
 
 
 def _write_parquet_dir(dir_path: Path, rows: list[dict]) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
     pq.write_table(
-        _rows_to_table(rows), dir_path / "part-00000.parquet", compression="snappy"
+        rows_to_table(rows), dir_path / "part-00000.parquet", compression="snappy"
     )
     (dir_path / "_SUCCESS").write_text("")
 
 
 def _stage_tree(output_root: Path, name: str, *, required: bool = True) -> list[str]:
-    """Copy a named subdirectory into output so it uploads to MinIO with the dataset."""
     src = _CHALLENGE_DIR / name
     if not src.is_dir():
         if required:
@@ -248,11 +207,12 @@ def generate_local(output_root: Path) -> dict[str, Any]:
         case_id = spec["id"]
         tier = spec["tier"]
         seed = DATA_SEED + (i + 1) * 1009
+        kinds = tuple(spec["kinds"])
         rows, kind_counts = generate_rows(
             n_rows=int(spec["rows"]),
-            invalid_rate=float(spec["invalid_rate"]),
+            dirty_rate=float(spec["dirty_rate"]),
             seed=seed,
-            kind_bias=spec.get("kind_bias"),
+            kinds=kinds,
         )
         case_dir = output_root / "testcases" / case_id
         _write_parquet_dir(case_dir / "input", rows)
@@ -269,7 +229,7 @@ def generate_local(output_root: Path) -> dict[str, Any]:
                 "tier": tier,
                 "input_rows": len(rows),
                 "expected_rows": expected_count,
-                "invalid_kind_counts": kind_counts,
+                "kind_counts": kind_counts,
                 "seed": seed,
                 "input": f"testcases/{case_id}/input/",
                 "expected": f"testcases/{case_id}/expected/",
@@ -298,16 +258,23 @@ def generate_local(output_root: Path) -> dict[str, Any]:
         "run_cases": run_ids,
         "submit_cases": submit_ids,
         "grade": {
-            "mode": "parquet_row_diff",
-            "keys": ["transaction_id"],
-            "per_testcase": True,
+            "script": "grade/grade.py",
+            "keys": ["txn_id"],
+            "sections": ["functional", "performance"],
         },
         "testcases": case_records,
-        "validity": {
-            "product_id": "not null",
-            "quantity": "not null and > 0 and <= 100",
-            "currency": "in USD|EUR|GBP",
-            "status": "COMPLETED",
+        "in_scope_columns": [
+            "product_id",
+            "quantity",
+            "discount_pct",
+            "currency",
+            "status",
+        ],
+        "transforms": {
+            "replace": "currency aliases (usd, $) and status aliases (complete, Complete, completed)",
+            "fillna": "discount_pct → 0, currency → USD",
+            "dropna": "product_id",
+            "filter": "quantity in (0, 100], currency in USD|EUR|GBP, status == COMPLETED",
         },
     }
     (output_root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -375,7 +342,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print(f"==> generating l1-filter-valid-sales-rows cases={len(CASE_SPECS)} DATA_SEED={DATA_SEED}")
+    print(
+        f"==> generating l1-filter-valid-sales-rows cases={len(CASE_SPECS)} "
+        f"DATA_SEED={DATA_SEED}"
+    )
 
     if args.output_dir:
         out = args.output_dir
@@ -387,7 +357,10 @@ def main() -> None:
     try:
         manifest = generate_local(out)
         print(f"==> wrote under {out}")
-        print(f"==> run_cases={manifest['run_cases']} submit_cases={manifest['submit_cases']}")
+        print(
+            f"==> run_cases={manifest['run_cases']} "
+            f"submit_cases={manifest['submit_cases']}"
+        )
         if args.dry_run or args.output_dir:
             return
         print(f"==> uploading to s3://{args.bucket}/{args.prefix}")

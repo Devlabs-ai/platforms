@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Publish static MinIO SSOT for Interchange Fee Settlement Summary.
 
-Does not regenerate the 100M fact or the rate card — those already live under
+Does not regenerate the 150M fact or the rate card — those already live under
 datasets/payment-network/. Uploads challenge / starter / solution / grade.
 The reference CSV under expected/ is produced by the salted Spark job.
 """

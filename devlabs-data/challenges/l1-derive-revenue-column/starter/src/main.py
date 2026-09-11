@@ -1,4 +1,4 @@
-"""Derive revenue column — Spark entrypoint."""
+"""POS overnight tickets — Spark entrypoint."""
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
@@ -13,9 +13,7 @@ def main() -> None:
 
     df = spark.read.parquet(INPUT_PATH)
 
-    # TODO: add revenue = quantity * unit_price * (1 - discount_pct)
-    #       as DECIMAL(12,2), keep all input columns, then:
-    #   out.write.mode("overwrite").parquet(OUTPUT_PATH)
+    # TODO: keep POS only, trim txn_id, one row per ticket, then write Parquet.
     _ = F
 
     spark.stop()

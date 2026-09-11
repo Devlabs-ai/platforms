@@ -1,0 +1,7 @@
+[
+  "Use withColumn to append revenue without dropping other columns.",
+  "Cast intermediates to decimal before multiplying if you need stable scale.",
+  "discount_pct is a fraction (0.10 = 10%), already between 0 and 0.50.",
+  "spark.read.parquet(INPUT_PATH) reads every staged testcase file.",
+  "OUTPUT_PATH is unique per Run/Submit — overwrite does not clear prior jobs' results."
+]

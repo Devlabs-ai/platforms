@@ -1,0 +1,227 @@
+{
+  "id": "l1-store-contribution-hours",
+  "number": 5,
+  "title": "The Hours That Counted",
+  "contentSource": "minio",
+  "description": "> **Who is asking**\n>\n> **District** is Vesper's regional store-ops team. They manage a group of stores. **Science** is the data-science group. They created the contribution formula below. Neither District nor Science are columns in the data.\n\nVesper drops one Parquet file each night. This file contains all transactions from the previous day, including ones that happened before the store opened and after it closed.\n\nScience built their contribution model using only transactions that occurred during business hours: **9 AM to 9 PM UTC**. District needs the contribution total for each store.\n\n**Filter: Keep only transactions where `event_ts` (UTC) falls within business hours:**\n\n```text\nhour >= 9  and  hour < 21\n```\n\nThis means 09:00:00 is included, but 21:00:00 is not. A transaction at 08:59 is before business hours (drop it). A transaction at 21:00 or later is after business hours (drop it).\n\nDo **not** filter by channel or status. Keep web, app, cancelled, and pending transactions if they happened during business hours. The filter is only on the time.\n\nFor each transaction you keep, calculate:\n\n```text\npromo_penalty = (1 - discount_pct) * (1 - discount_pct)\nline_contribution = round(quantity * unit_price * promo_penalty, 2)\n```\n\n`discount_pct` is a decimal (0.10 means 10% off). Round each line to 2 decimals, then sum by store.\n\nRead from `INPUT_PATH`. Write to `OUTPUT_PATH`.\n\nUse Spark DataFrame operations. Do not use `collect()` to loop in Python.\n\n## Rules\n\nThese must all be true for your output:\n\n- **Time filter.** Keep only transactions where `hour(event_ts) >= 9` and `hour(event_ts) < 21` in UTC. Do not filter by channel or status.\n- **One row per store.** One output row for each `store_id` that has at least one transaction during business hours.\n- **`total_contribution`.** Sum of `line_contribution` for that store, as `DECIMAL(12,2)`.\n- **`ticket_count`.** Count of transactions for that store that were during business hours (`LONG`).\n- **Columns.** Write only `store_id`, `total_contribution`, `ticket_count`. Do not include other columns.\n\nCalculate the penalty on each line before summing. Do not sum revenue first and then apply the formula to the store total.\n\n> **What you write**\n>\n> Three columns, one row per store with business-hours transactions. Run and Submit use different data — do not hard-code values from the example.\n\n## Example\n\nExample data (showing relevant columns only). Business hours: **09:00 ≤ hour < 21:00** UTC.\n\n| txn_id | store_id | channel | status | event_ts (UTC) | quantity | unit_price | discount_pct | Keep? |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| t1 | 5 | POS | COMPLETED | 2026-01-15 14:00:00 | 2 | 10.00 | 0.00 | Yes. penalty 1.00 → 20.00 |\n| t2 | 5 | web | COMPLETED | 2026-01-15 16:00:00 | 1 | 10.00 | 0.10 | Yes. penalty 0.81 → 8.10 |\n| t3 | 5 | POS | COMPLETED | 2026-01-15 08:59:00 | 1 | 10.00 | 0.00 | No. Hour is 8 (before 9) |\n| t4 | 5 | POS | COMPLETED | 2026-01-15 21:00:00 | 1 | 50.00 | 0.00 | No. Hour is 21 (not < 21) |\n| t5 | 9 | app | CANCELLED | 2026-01-15 11:00:00 | 1 | 10.00 | 0.00 | Yes. Hour is 11 → 10.00 |\n| t6 | 9 | POS | COMPLETED | 2026-01-15 22:10:00 | 3 | 10.00 | 0.00 | No. Hour is 22 (after 21) |\n\n**Output**\n\n| store_id | total_contribution | ticket_count |\n| --- | --- | --- |\n| 5 | 28.10 | 2 |\n| 9 | 10.00 | 1 |\n\nExplanation:\n- t2 is web but kept because it happened during business hours.\n- t3, t4, t6 are all POS/COMPLETED but dropped because they happened outside business hours.\n- t5 is cancelled but kept because it happened during business hours.\n- Store 5: 20.00 + 8.10 = 28.10 from 2 transactions.\n- Store 9: 10.00 from 1 transaction.\n\nCommon mistakes:\n- If you filter for POS and COMPLETED, you'll drop t2 and t5 (wrong filter).\n- If you use `hour <= 21`, you'll include t4 (wrong boundary).\n",
+  "difficulty": "L0",
+  "tags": [
+    "spark",
+    "l0",
+    "dataframe",
+    "parquet",
+    "aggregate",
+    "timestamp"
+  ],
+  "category": "batch-processing",
+  "sandboxType": "spark-platform",
+  "play": {
+    "domainId": "data-engineer",
+    "panelId": "spark"
+  },
+  "problemStatement": {
+    "hints": [],
+    "data": {
+      "overview": "Vesper overnight sales fact (15 columns). Mixed timestamps inside and outside business hours (9-21 UTC). Calculate per-line contribution with promo penalty, aggregate by store.",
+      "testcases": {
+        "run": [
+          {
+            "name": "01-contribution",
+            "rows": "varies by store",
+            "detail": "20,000 input rows; 60% in-hours (9-21 UTC); calculate contribution per store"
+          }
+        ],
+        "submit": [
+          {
+            "name": "02-contribution",
+            "rows": "varies by store",
+            "detail": "100,000 input rows; 60% in-hours; different stores than Run"
+          }
+        ]
+      },
+      "datasets": [
+        {
+          "name": "Overnight sales",
+          "env": "INPUT_PATH",
+          "kind": "fact",
+          "schema": [
+            {
+              "column": "txn_id",
+              "type": "STRING"
+            },
+            {
+              "column": "store_id",
+              "type": "INT"
+            },
+            {
+              "column": "register_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_id",
+              "type": "INT"
+            },
+            {
+              "column": "product_code",
+              "type": "STRING"
+            },
+            {
+              "column": "customer_id",
+              "type": "INT"
+            },
+            {
+              "column": "quantity",
+              "type": "INT"
+            },
+            {
+              "column": "unit_price",
+              "type": "DECIMAL(10,2)"
+            },
+            {
+              "column": "discount_pct",
+              "type": "DECIMAL(5,2)"
+            },
+            {
+              "column": "currency",
+              "type": "STRING"
+            },
+            {
+              "column": "status",
+              "type": "STRING"
+            },
+            {
+              "column": "channel",
+              "type": "STRING"
+            },
+            {
+              "column": "payment_method",
+              "type": "STRING"
+            },
+            {
+              "column": "country_code",
+              "type": "STRING"
+            },
+            {
+              "column": "event_ts",
+              "type": "TIMESTAMP"
+            }
+          ]
+        }
+      ]
+    },
+    "inputSchema": [
+      {
+        "column": "txn_id",
+        "type": "STRING"
+      },
+      {
+        "column": "store_id",
+        "type": "INT"
+      },
+      {
+        "column": "register_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_id",
+        "type": "INT"
+      },
+      {
+        "column": "product_code",
+        "type": "STRING"
+      },
+      {
+        "column": "customer_id",
+        "type": "INT"
+      },
+      {
+        "column": "quantity",
+        "type": "INT"
+      },
+      {
+        "column": "unit_price",
+        "type": "DECIMAL(10,2)"
+      },
+      {
+        "column": "discount_pct",
+        "type": "DECIMAL(5,2)"
+      },
+      {
+        "column": "currency",
+        "type": "STRING"
+      },
+      {
+        "column": "status",
+        "type": "STRING"
+      },
+      {
+        "column": "channel",
+        "type": "STRING"
+      },
+      {
+        "column": "payment_method",
+        "type": "STRING"
+      },
+      {
+        "column": "country_code",
+        "type": "STRING"
+      },
+      {
+        "column": "event_ts",
+        "type": "TIMESTAMP"
+      }
+    ],
+    "expectedOutput": [
+      {
+        "column": "store_id",
+        "description": "Store identifier"
+      },
+      {
+        "column": "total_contribution",
+        "description": "DECIMAL(12,2) sum of round(qty * price * (1-disc)², 2) for in-hours transactions"
+      },
+      {
+        "column": "ticket_count",
+        "description": "LONG count of in-hours transactions per store"
+      }
+    ],
+    "moat": "Setter notes — not shown to learners.\n\n## What was in mind\n\nLab 5 of the **Vesper** overnight-sales sequence. Same 15-column fact. This lab teaches time-based filtering (hour extraction) + custom per-row math + groupBy aggregation.\n\nThe line we wanted: filter `hour(event_ts) >= 9 AND hour(event_ts) < 21` → withColumn per-line contribution → groupBy(store_id) → sum + count.\n\nThe learner brief lists those constraints as rules, not a recipe. Intended order is filter time → calculate penalty per row → groupBy store → aggregate.\n\n| Step | Transform | Kind |\n| --- | --- | --- |\n| `event_ts` | `filter` `hour >= 9 AND < 21` | narrow |\n| penalty | `withColumn` `(1-disc)*(1-disc)` | narrow |\n| contribution | `withColumn` `round(qty*price*penalty, 2)` | narrow |\n| aggregate | `groupBy(\"store_id\")` → `sum`, `count` | wide — shuffle |\n\nKey plants:\n- 40% of transactions are **outside** hours (before 9, at/after 21) with varied channel/status\n- In-hours transactions include web, app, cancelled, pending — **not** just POS completed\n- Boundary at 21:00 (exclusive) tests `< 21` vs `<= 21`\n\nThe question we wanted a failed Submit to answer: **did you filter by hour only, or did you also filter POS+COMPLETED? Did you calculate penalty per line, or did you sum first and square once?**\n\n## Why not POS floor\n\nLabs 2–4 used POS + COMPLETED. This lab deliberately does **not** — Science's model is hour-based. Web at 14:00 stays. POS at 22:00 goes. Muscle memory from earlier labs is a trap.\n\n## How we created the cases\n\nEvery row gets a random hour: 60% in 9–20 (in-hours), 40% in 0–8 or 21–23 (out-of-hours). Mix of all channels and statuses. `DATA_SEED=42`. Stores 10–29 (Run), 50–99 (Submit).\n\n1. **`01-contribution` (20k, Run)** — stores 10–29, ~12k in-hours rows\n2. **`02-contribution` (100k, Submit)** — stores 50–99, ~60k in-hours rows\n\nOracle is `solution/solve.py` (Python loop calculates same golden as `solution/src/main.py`). Grade is a row-diff on `store_id`.\n\n## Testcase distribution\n\n| | Run `01-contribution` | Submit `02-contribution` |\n| --- | --- | --- |\n| Input rows | 20,000 | 100,000 |\n| In-hours (9–20) | ~12,000 (60%) | ~60,000 (60%) |\n| Out-of-hours (0–8, 21–23) | ~8,000 (40%) | ~40,000 (40%) |\n| Stores | 10–29 (20 stores) | 50–99 (50 stores) |\n| Output rows | ~20 stores | ~50 stores |\n\nGoldens written by `solution/solve.py` (Python loop, no Spark). Spark solution matches byte-for-byte.\n"
+  },
+  "platformSpec": {
+    "contentSource": "minio",
+    "testcasesPrefix": "s3a://devlabs-data/challenges/l1-store-contribution-hours/testcases/",
+    "runCases": [
+      "01-contribution"
+    ],
+    "submitCases": [
+      "02-contribution"
+    ],
+    "inputPath": "s3a://devlabs-data/challenges/l1-store-contribution-hours/testcases/",
+    "evalSolutionPath": "s3a://devlabs-data/challenges/l1-store-contribution-hours/testcases/",
+    "outputFormat": "parquet",
+    "gradeKeys": [
+      "store_id"
+    ],
+    "gradeScript": "s3a://devlabs-data/challenges/l1-store-contribution-hours/grade/grade.py",
+    "language": "python",
+    "starterFileName": "src/main.py",
+    "limits": {
+      "driver": 1,
+      "driverMemory": "1g",
+      "executors": 2,
+      "executorCores": 1,
+      "executorMemory": "1g",
+      "aqe": false,
+      "shufflePartitions": 8,
+      "hardTimeoutSeconds": 120
+    },
+    "sparkConf": {
+      "spark.sql.adaptive.enabled": "false",
+      "spark.sql.shuffle.partitions": "8"
+    },
+    "gradeChecks": [
+      "Functional: candidate Parquet matches expected store_id, total_contribution, ticket_count",
+      "Performance: not specified for this lab"
+    ]
+  }
+}

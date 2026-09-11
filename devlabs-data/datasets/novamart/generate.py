@@ -15,7 +15,7 @@ fit a 512 MB Spark driver. Current-row snapshot is 40k rows and is safe to BHJ.
 Usage:
   python3 generate.py                  # local ./_out/
   python3 generate.py --upload
-  python3 generate.py --upload --expected-dir ../../challenges/l3-broadcast-catalog-enrichment/expected
+  python3 generate.py --expected-dir ./_out/expected
 """
 from __future__ import annotations
 
@@ -396,9 +396,6 @@ def main() -> int:
     if args.upload:
         upload_dir(args.out / "dims", f"{args.prefix}/dims")
         upload_dir(args.out / "events", f"{args.prefix}/events")
-        if args.expected_dir and args.expected_dir.exists():
-            exp_prefix = "challenges/l3-broadcast-catalog-enrichment/expected"
-            upload_dir(args.expected_dir, exp_prefix)
         print(f"UPLOAD_OK  s3a://…/{args.prefix}/")
     else:
         print("NOTE  pass --upload to push to MinIO")

@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLATFORM_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-MAC_MINI_IP="${MAC_MINI_IP:-192.168.1.9}"
+MAC_MINI_IP="${MAC_MINI_IP:-192.168.1.2}"
 NAMESPACE="${DEVLABS_NAMESPACE:-devlabs}"
 COLIMA_CPU="${COLIMA_CPU:-8}"
 COLIMA_MEMORY_GIB="${COLIMA_MEMORY_GIB:-12.5}"
@@ -30,7 +30,7 @@ echo "==> Applying Kubernetes manifests"
 kubectl apply -f "${PLATFORM_DIR}/k8s/rbac.yaml"
 
 TMP_DEP="$(mktemp)"
-sed -e "s|value: \"192.168.1.9\"|value: \"${MAC_MINI_IP}\"|" \
+sed -e "s|value: \"192.168.1.2\"|value: \"${MAC_MINI_IP}\"|" \
     -e "s|value: \"8\"|value: \"${COLIMA_CPU}\"|" \
     -e "s|value: \"12.5\"|value: \"${COLIMA_MEMORY_GIB}\"|" \
     -e "s|value: \"16\"|value: \"${HOST_MEMORY_GIB}\"|" \
